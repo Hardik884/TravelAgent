@@ -1,0 +1,132 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;600;700;800&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root{
+  --bg-1: #0f1724; /* dark navy */
+  --bg-2: #0b1220; /* deeper */
+  --surface: rgba(255,255,255,0.04);
+  --glass-border: rgba(255,255,255,0.12);
+  --muted: rgba(255,255,255,0.7);
+  --accent: #14b8a6; /* teal */
+  --accent-2: #7c3aed; /* indigo */
+}
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  html, body, #root {
+    height: 100%;
+  }
+
+  body {
+    font-family: 'Plus Jakarta Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial;
+    color: #e6eef4;
+    background: linear-gradient(180deg, rgba(7,10,16,1) 0%, rgba(8,12,20,1) 100%);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    line-height: 1.4;
+  }
+}
+
+@layer components {
+  /* Glass surface used across the app */
+  .glass-scope {
+    background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02));
+    backdrop-filter: blur(10px) saturate(120%);
+    -webkit-backdrop-filter: blur(10px) saturate(120%);
+    border: 1px solid var(--glass-border);
+    box-shadow: 0 10px 30px rgba(2,6,23,0.6);
+  }
+
+  .glass {
+    background: rgba(255,255,255,0.04);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1px solid rgba(255,255,255,0.06);
+  }
+
+  .glass-input {
+    background: rgba(255,255,255,0.03);
+    color: var(--muted);
+    border: 1px solid rgba(255,255,255,0.06);
+    transition: box-shadow .18s ease, transform .18s ease, border-color .18s ease;
+  }
+
+  /* Ensure native select dropdown options are readable (dark text on white dropdown) */
+  .glass-input option {
+    color: #0b1220; /* dark text for options */
+    background: #ffffff;
+  }
+
+  /* For Firefox, set color on select and option via appearance reset */
+  .glass-input::-moz-focus-inner {
+    color: #0b1220;
+  }
+
+  .glass-input:focus {
+    box-shadow: 0 6px 24px rgba(20,184,166,0.08);
+    border-color: rgba(20,184,166,0.8);
+    transform: translateY(-1px);
+  }
+
+  .glass-button {
+    /* subtle, minimal primary */
+    @apply text-white font-medium;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.08);
+    box-shadow: 0 8px 24px rgba(2,6,23,0.45);
+    transition: transform .12s ease, box-shadow .12s ease, background .12s ease;
+  }
+
+  .glass-button:hover {
+    background: rgba(255,255,255,0.08);
+    transform: translateY(-1px);
+    box-shadow: 0 14px 34px rgba(2,6,23,0.5);
+  }
+
+  .btn-ghost {
+    background: transparent;
+    border: 1px solid rgba(255,255,255,0.06);
+    color: rgba(255,255,255,0.9);
+    transition: background .15s ease, transform .15s ease;
+  }
+
+  .btn-ghost:hover {
+    background: rgba(255,255,255,0.02);
+    transform: translateY(-1px);
+  }
+
+  .card-fade {
+    animation: fadeUp .5s ease both;
+  }
+}
+
+@layer utilities {
+  .brand-title {
+    letter-spacing: 0.2px;
+  }
+
+  .soft-shadow {
+    box-shadow: 0 6px 20px rgba(2,6,23,0.6);
+  }
+
+  .muted {
+    color: rgba(255,255,255,0.75);
+  }
+}
+
+@keyframes floaty {
+  0% { transform: translateY(0px); }
+  50% { transform: translateY(-6px); }
+  100% { transform: translateY(0px); }
+}
+
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
