@@ -1,37 +1,114 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Search, SlidersHorizontal } from 'lucide-react';
+import { Search, SlidersHorizontal, Loader2 } from 'lucide-react';
 import HotelCard from '../components/HotelCard';
-import { mockHotels } from '../utils/mockData';
+import { useTripContext } from '../context/TripContext';
+import { hotelAPI } from '../utils/api';
+import type { Hotel } from '../types';
 
 export default function Hotels() {
   const navigate = useNavigate();
+  const { tripData, budgetData, selectedHotel, setSelectedHotel } = useTripContext();
+  
+  const [hotels, setHotels] = useState<Hotel[]>([]);
+  const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [priceRange, setPriceRange] = useState([0, 20000]);
   const [ratingFilter, setRatingFilter] = useState(0);
   const [sortBy, setSortBy] = useState('rating');
   const [showFilters, setShowFilters] = useState(false);
-  const [selectedHotel, setSelectedHotel] = useState<any>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  const filteredHotels = mockHotels
+  useEffect(() => {
+    if (tripData && budgetData) {
+      fetchHotels();
+    } else {
+      navigate('/trip-planner');
+    }
+  }, [tripData, budgetData]);
+
+  const fetchHotels = async () => {
+    if (!tripData || !budgetData) return;
+    
+    setLoading(true);
+    setError(null);
+    
+    try {
+      // Find accommodation budget
+      const accommodationBudget = budgetData.breakdown.find(
+        item => item.name.toLowerCase() === 'accommodation'
+      );
+      
+      // Calculate days correctly
+      const startDate = new Date(tripData.start_date);
+      const endDate = new Date(tripData.end_date);
+      const days = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
+      const validDays = Math.max(days, 1);
+      
+      const maxPricePerNight = accommodationBudget 
+        ? accommodationBudget.value / validDays
+        : 5000;
+
+      console.log('Searching hotels with:', {
+        destination: tripData.destination,
+        days: validDays,
+        maxPricePerNight,
+        accommodationBudget: accommodationBudget?.value
+      });
+
+      const searchRequest = {
+        destination: tripData.destination,
+        check_in: tripData.start_date,
+        check_out: tripData.end_date,
+        adults: tripData.adults,
+        children: tripData.children,
+        max_price: maxPricePerNight * 1.5, // Allow some flexibility
+        trip_type: tripData.trip_type,
+      };
+
+      const response = await hotelAPI.search(searchRequest);
+      console.log('Hotels received:', response.hotels.length);
+      setHotels(response.hotels);
+      setPriceRange([0, Math.max(...response.hotels.map(h => h.price)) || 20000]);
+    } catch (err) {
+      console.error('Hotel search error:', err);
+      setError('Failed to load hotels. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+
+  const filteredHotels = hotels
     .filter(hotel =>
       hotel.name.toLowerCase().includes(searchTerm.toLowerCase()) &&
       hotel.price >= priceRange[0] &&
       hotel.price <= priceRange[1] &&
-      parseFloat(hotel.rating) >= ratingFilter
+      hotel.rating >= ratingFilter
     )
     .sort((a, b) => {
       if (sortBy === 'price-low') return a.price - b.price;
       if (sortBy === 'price-high') return b.price - a.price;
-      return parseFloat(b.rating) - parseFloat(a.rating);
+      return b.rating - a.rating;
     });
 
   const handleContinue = () => {
     if (selectedHotel) {
-      navigate('/transport', { state: { selectedHotel } });
+      navigate('/transport');
     }
   };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="w-12 h-12 text-teal-400 animate-spin mx-auto mb-4" />
+          <p className="text-white text-lg">Searching for perfect hotels...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen relative">

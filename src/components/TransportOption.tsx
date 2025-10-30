@@ -1,22 +1,10 @@
 import { ChevronDown, ChevronUp, Check } from 'lucide-react';
 import { useState } from 'react';
-
-interface TransportOption {
-  mode: string;
-  icon: string;
-  duration: string;
-  priceRange: string;
-  note: string;
-  options: Array<{
-    carrier: string;
-    time: string;
-    price: number;
-  }>;
-}
+import type { TransportMode } from '../types';
 
 interface Props {
-  transport: TransportOption;
-  onSelect?: (mode: string, option: any) => void;
+  transport: TransportMode;
+  onSelect?: (transportMode: TransportMode) => void;
   selected?: boolean;
 }
 
@@ -26,7 +14,7 @@ export default function TransportOption({ transport, onSelect, selected }: Props
 
   const handleSelect = (index: number) => {
     setSelectedOption(index);
-    onSelect?.(transport.mode, transport.options[index]);
+    onSelect?.(transport);
   };
 
   return (
@@ -47,7 +35,7 @@ export default function TransportOption({ transport, onSelect, selected }: Props
           </div>
           <div className="flex items-center gap-4">
             <div className="text-right">
-              <p className="text-white font-medium">{transport.priceRange}</p>
+              <p className="text-white font-medium">{transport.price_range}</p>
               <p className="text-teal-300 text-sm">{transport.note}</p>
             </div>
             {isExpanded ? (

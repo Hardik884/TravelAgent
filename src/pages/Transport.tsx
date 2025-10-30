@@ -1,22 +1,78 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
+import { Loader2 } from 'lucide-react';
 import TransportOption from '../components/TransportOption';
-import { mockTransportOptions } from '../utils/mockData';
+import { useTripContext } from '../context/TripContext';
+import { transportAPI } from '../utils/api';
+import type { TransportMode } from '../types';
 
 export default function Transport() {
   const navigate = useNavigate();
-  const [selectedTransport, setSelectedTransport] = useState<any>(null);
+  const { tripData, budgetData, selectedTransport, setSelectedTransport } = useTripContext();
+  
+  const [transportModes, setTransportModes] = useState<TransportMode[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const handleSelect = (mode: string, option: any) => {
-    setSelectedTransport({ mode, ...option });
+  useEffect(() => {
+    if (tripData && budgetData) {
+      fetchTransport();
+    } else {
+      navigate('/trip-planner');
+    }
+  }, []);
+
+  const fetchTransport = async () => {
+    if (!tripData || !budgetData) return;
+    
+    setLoading(true);
+    setError(null);
+    
+    try {
+      const transportBudget = budgetData.breakdown.find(
+        item => item.name.toLowerCase() === 'transport'
+      );
+
+      const searchRequest = {
+        origin: tripData.origin, // Use user's origin city
+        destination: tripData.destination,
+        travel_date: tripData.start_date,
+        adults: tripData.adults,
+        children: tripData.children,
+        budget_allocation: transportBudget?.value || 10000,
+      };
+
+      const response = await transportAPI.search(searchRequest);
+      setTransportModes(response.transport_modes);
+    } catch (err) {
+      console.error('Transport search error:', err);
+      setError('Failed to load transport options. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSelect = (transportMode: TransportMode) => {
+    setSelectedTransport(transportMode);
   };
 
   const handleContinue = () => {
     if (selectedTransport) {
-      navigate('/activities', { state: { selectedTransport } });
+      navigate('/activities');
     }
   };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="w-12 h-12 text-teal-400 animate-spin mx-auto mb-4" />
+          <p className="text-white text-lg">Finding best transport options...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen relative">
@@ -49,13 +105,19 @@ export default function Transport() {
               className="glass rounded-xl p-4 mb-6"
             >
               <p className="text-white">
-                <span className="font-semibold">Selected:</span> {selectedTransport.mode} - {selectedTransport.carrier} (₹{selectedTransport.price.toLocaleString()})
+                <span className="font-semibold">Selected:</span> {selectedTransport.mode} - {selectedTransport.price_range}
               </p>
             </motion.div>
           )}
 
+          {error && (
+            <div className="mb-6 p-4 bg-red-500/20 border border-red-500/50 rounded-lg text-red-300">
+              {error}
+            </div>
+          )}
+
           <div className="space-y-4">
-            {mockTransportOptions.map((transport, index) => (
+            {transportModes.map((transport, index) => (
               <motion.div
                 key={transport.mode}
                 initial={{ opacity: 0, y: 20 }}

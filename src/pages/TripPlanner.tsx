@@ -3,10 +3,14 @@ import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Calendar, Users, Wallet, MapPin, Loader2, User } from 'lucide-react';
 import BudgetChart from '../components/BudgetChart';
-import { mockBudgetData, tripTypes } from '../utils/mockData';
+import { tripTypes } from '../utils/mockData';
+import { budgetAPI } from '../utils/api';
+import { useTripContext } from '../context/TripContext';
+import type { TripData } from '../types';
 
-interface TripData {
+interface FormData {
   tripType: string;
+  origin: string;
   destination: string;
   startDate: string;
   endDate: string;
@@ -17,8 +21,14 @@ interface TripData {
 
 export default function TripPlanner() {
   const navigate = useNavigate();
-  const [formData, setFormData] = useState<TripData>({
+  const { setTripData, budgetData, setBudgetData } = useTripContext();
+  
+  // Get today's date in YYYY-MM-DD format
+  const today = new Date().toISOString().split('T')[0];
+  
+  const [formData, setFormData] = useState<FormData>({
     tripType: '',
+    origin: '',
     destination: '',
     startDate: '',
     endDate: '',
@@ -28,23 +38,76 @@ export default function TripPlanner() {
   });
   const [loading, setLoading] = useState(false);
   const [showBudget, setShowBudget] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
-    setFormData({ ...formData, [e.target.name]: e.target.value });
+    const { name, value } = e.target;
+    
+    // Date validation
+    if (name === 'startDate') {
+      if (value < today) {
+        setError('Start date cannot be in the past');
+        return;
+      }
+      // If end date is set and is before new start date, clear end date
+      if (formData.endDate && value > formData.endDate) {
+        setFormData({ ...formData, startDate: value, endDate: '' });
+        setError('End date reset - please select end date after start date');
+        return;
+      }
+    }
+    
+    if (name === 'endDate') {
+      if (value < today) {
+        setError('End date cannot be in the past');
+        return;
+      }
+      if (formData.startDate && value < formData.startDate) {
+        setError('End date must be after start date');
+        return;
+      }
+    }
+    
+    setFormData({ ...formData, [name]: value });
+    setError(null);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
+    setError(null);
 
-    await new Promise(resolve => setTimeout(resolve, 1500));
+    try {
+      // Prepare trip data
+      const tripDataPayload: TripData = {
+        trip_type: formData.tripType,
+        origin: formData.origin,
+        destination: formData.destination,
+        start_date: formData.startDate,
+        end_date: formData.endDate,
+        budget: parseFloat(formData.budget),
+        adults: parseInt(formData.adults),
+        children: parseInt(formData.children),
+      };
 
-    setLoading(false);
-    setShowBudget(true);
+      // Call budget analysis API
+      const budgetResponse = await budgetAPI.analyze(tripDataPayload);
+      
+      // Store in context
+      setTripData(tripDataPayload);
+      setBudgetData(budgetResponse);
+      
+      setShowBudget(true);
+    } catch (err) {
+      console.error('Budget analysis error:', err);
+      setError('Failed to analyze budget. Please check your connection and try again.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleContinue = () => {
-    navigate('/hotels', { state: { tripData: formData } });
+    navigate('/hotels');
   };
 
   return (
@@ -82,6 +145,22 @@ export default function TripPlanner() {
                 </div>
 
                 <div className="glass rounded-lg p-4">
+                  <label className="block text-gray-100 mb-2 font-medium">Origin City</label>
+                  <div className="relative">
+                    <MapPin className="absolute left-3 top-3.5 w-5 h-5 text-teal-400" />
+                    <input
+                      type="text"
+                      name="origin"
+                      value={formData.origin}
+                      onChange={handleChange}
+                      required
+                      placeholder="Where are you traveling from?"
+                      className="w-full glass-input rounded-lg pl-11 pr-4 py-3"
+                    />
+                  </div>
+                </div>
+
+                <div className="glass rounded-lg p-4">
                   <label className="block text-gray-100 mb-2 font-medium">Destination</label>
                   <div className="relative">
                     <MapPin className="absolute left-3 top-3.5 w-5 h-5 text-gray-400" />
@@ -107,6 +186,7 @@ export default function TripPlanner() {
                         name="startDate"
                         value={formData.startDate}
                         onChange={handleChange}
+                        min={today}
                         required
                         className="w-full glass-input rounded-lg pl-11 pr-4 py-3"
                       />
@@ -122,6 +202,7 @@ export default function TripPlanner() {
                         name="endDate"
                         value={formData.endDate}
                         onChange={handleChange}
+                        min={formData.startDate || today}
                         required
                         className="w-full glass-input rounded-lg pl-11 pr-4 py-3"
                       />
@@ -195,6 +276,12 @@ export default function TripPlanner() {
                     'Generate Budget Plan'
                   )}
                 </button>
+                
+                {error && (
+                  <div className="mt-4 p-4 bg-red-500/20 border border-red-500/50 rounded-lg text-red-300">
+                    {error}
+                  </div>
+                )}
               </form>
             </div>
           ) : (
@@ -204,7 +291,17 @@ export default function TripPlanner() {
               transition={{ duration: 0.5 }}
               className="space-y-6"
             >
-              <BudgetChart data={mockBudgetData} />
+              {budgetData && <BudgetChart data={budgetData} />}
+              
+              {budgetData?.recommendations && (
+                <div className="glass-scope rounded-xl p-6">
+                  <h3 className="text-xl font-bold text-white mb-4">💡 AI Recommendations</h3>
+                  <div className="text-gray-300 whitespace-pre-line">
+                    {budgetData.recommendations}
+                  </div>
+                </div>
+              )}
+              
               <div className="flex justify-center gap-4">
                 <button
                   onClick={() => setShowBudget(false)}

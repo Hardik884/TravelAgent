@@ -1,18 +1,9 @@
 import { Star, MapPin } from 'lucide-react';
-
-interface Hotel {
-  id: number;
-  name: string;
-  price: number;
-  rating: string;
-  image: string;
-  tag: string;
-  location: string;
-}
+import type { Hotel } from '../types';
 
 interface Props {
   hotel: Hotel;
-  onSelect?: (hotel: Hotel) => void;
+  onSelect?: (hotel: Hotel | null) => void;
 }
 
 export default function HotelCard({ hotel, onSelect }: Props) {
@@ -45,7 +36,7 @@ export default function HotelCard({ hotel, onSelect }: Props) {
           <div className="text-right">
             <div className="flex items-center gap-2 justify-end">
               <Star className="w-4 h-4 fill-yellow-400 text-yellow-400" />
-              <span className="text-white font-medium">{hotel.rating}</span>
+              <span className="text-white font-medium">{hotel.rating.toFixed(1)}</span>
             </div>
           </div>
         </div>

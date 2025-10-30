@@ -11,6 +11,9 @@ dist
 dist-ssr
 *.local
 
+# Vite cache
+.vite/
+
 .vscode/*
 !.vscode/extensions.json
 .idea
@@ -21,3 +24,33 @@ dist-ssr
 *.sln
 *.sw?
 .env
+.env.*
+!.env.example
+
+# Python / FastAPI
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+.python-version
+.venv/
+venv/
+backend/venv/
+env/
+ENV/
+pip-wheel-metadata/
+.mypy_cache/
+.pytest_cache/
+.coverage
+coverage/
+htmlcov/
+.cache/
+
+# Build artifacts (Python)
+*.egg
+*.egg-info/
+.eggs/
+
+# OS-specific
+Thumbs.db
