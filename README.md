@@ -56,220 +56,78 @@ Get your FREE Google AI Studio API key:
 - Create API key
 - Edit `backend\.env` and add:
 ```
-GOOGLE_AI_API_KEY=AIzaSy...your-actual-key
-```
+# Travel Agent AI
 
-**See [GOOGLE_AI_SETUP.md](GOOGLE_AI_SETUP.md) for detailed instructions**
+A full-stack travel planning application that combines a FastAPI backend with a React + TypeScript frontend.
 
-5. **Access the Application**
-- Frontend: http://localhost:5173
-- Backend API: http://localhost:8000
-- API Docs: http://localhost:8000/docs
+This repo contains a multi-agent system (budget, hotels, transport, activities) that helps generate budgets, recommend hotels and transport options, and produce day-by-day itineraries.
 
-## 📖 Usage Guide
+If you just want to run the project quickly, see `SETUP_GUIDE.md` for concise, platform-specific steps.
 
-### Step 1: Trip Planning
-1. Navigate to "Trip Planner"
-2. Select your trip type
-3. Enter destination and dates
-4. Set budget and travelers
-5. Get AI-powered budget breakdown
+## Highlights
+- AI-assisted budget allocation and itinerary generation
+- Real (optional) integrations: Amadeus (flights/hotels) and IRCTC (trains)
+- Responsive React + Tailwind frontend with glassmorphism UI components
+- FastAPI backend with MongoDB trip persistence
 
-### Step 2: Hotel Selection
-- Browse 100 AI-generated hotels
-- Filter by price, rating, location
-- View detailed amenities
-- Select your preferred stay
+## Quick links
+-- Quickstart (Windows PowerShell): `SETUP_GUIDE.md`
+- API docs (after backend starts): `http://localhost:8000/docs`
 
-### Step 3: Transport Options
-- Compare flights, trains, buses, cabs
-- View pricing and duration
-- Get AI recommendations
-- Select best option
+## Run locally (short)
+1. Backend: create a virtualenv, install requirements and run Uvicorn (see `SETUP_GUIDE.md`)
+2. Frontend: `npm install` and `npm run dev`
 
-### Step 4: Itinerary
-- View personalized day-by-day plan
-- See activity costs and timings
-- Get optimization tips
-- Regenerate for variations
+See `SETUP_GUIDE.md` for copy-paste PowerShell steps.
 
-### Step 5: Summary
-- Review complete trip plan
-- See total costs breakdown
-- Download trip details (coming soon)
+## Project structure
 
-## 🏗️ Architecture
-
-### Frontend (React + TypeScript)
+Frontend (Vite + React + TypeScript)
 ```
 src/
 ├── components/     # Reusable UI components
-├── pages/          # Page components
-├── context/        # State management
-├── types/          # TypeScript definitions
-└── utils/          # API client & utilities
+├── pages/          # Page-level components (Home, TripPlanner, Summary, etc.)
+├── utils/          # API client, mock data
+└── index.css       # Tailwind + global styles
 ```
 
-### Backend (FastAPI + OpenAI)
+Backend (FastAPI + agents)
 ```
 backend/
-├── agents/         # AI agent implementations
-│   ├── budget_agent.py
-│   ├── hotel_agent.py
-│   ├── transport_agent.py
-│   └── activities_agent.py
-├── models/         # Pydantic schemas
-├── main.py         # FastAPI application
-└── config.py       # Configuration
+├── agents/         # AI agent implementations (budget, hotel, transport, activities)
+├── utils/          # API helpers (IRCTC, Amadeus integration helpers)
+├── main.py         # FastAPI application and endpoints
+├── db.py           # MongoDB connection and helpers
+└── README.md       # Backend-specific instructions
 ```
 
-## 🔌 API Endpoints
+## Environment variables
+Create a `.env` in `backend/` (do not commit it). Add required variables listed in `backend/.env.example`.
 
-### Budget Analysis
-```http
-POST /api/budget/analyze
-Content-Type: application/json
+Typical variables:
+- `GOOGLE_AI_API_KEY` — required for AI-powered features (use your own key/service)
+- `MONGODB_URI` — MongoDB connection string (local or Atlas)
+- `RAPIDAPI_KEY` — optional (for IRCTC train data)
+- `AMADEUS_API_KEY` / `AMADEUS_API_SECRET` — optional (for Amadeus production hotel offers)
 
-{
-  "trip_type": "luxurious",
-  "destination": "Goa",
-  "start_date": "2025-12-01",
-  "end_date": "2025-12-05",
-  "budget": 50000,
-  "adults": 2,
-  "children": 0
-}
-```
+Notes:
+- Do NOT commit real API keys. `.gitignore` already includes `.env` and common venv/node ignores.
 
-### Hotel Search
-```http
-POST /api/hotels/search
-Content-Type: application/json
+## What changed in the cleanup
+- Removed noisy debug prints and retired one-off debug scripts.
+- Replaced ad-hoc prints with structured logging (backend) and removed console.debug logs from the frontend.
+- Added `QUICKSTART.md` with platform-specific steps and a short checklist before pushing to GitHub.
 
-{
-  "destination": "Goa",
-  "check_in": "2025-12-01",
-  "check_out": "2025-12-05",
-  "adults": 2,
-  "max_price": 5000,
-  "trip_type": "luxurious"
-}
-```
+## Next steps / contribution ideas
+- Add CI (GitHub Actions) for linting and type-checks
+- Add tests for backend endpoints and basic frontend unit tests
+- Add PDF export of itineraries and user authentication
 
-### Transport Search
-```http
-POST /api/transport/search
-Content-Type: application/json
-
-{
-  "origin": "Mumbai",
-  "destination": "Goa",
-  "travel_date": "2025-12-01",
-  "adults": 2,
-  "budget_allocation": 12000
-}
-```
-
-### Itinerary Generation
-```http
-POST /api/itinerary/generate
-Content-Type: application/json
-
-{
-  "destination": "Goa",
-  "start_date": "2025-12-01",
-  "end_date": "2025-12-05",
-  "trip_type": "luxurious",
-  "budget_allocation": 10000
-}
-```
-
-## 🛠️ Technology Stack
-
-### Frontend
-- **React 18** - UI library
-- **TypeScript** - Type safety
-- **Vite** - Build tool
-- **TailwindCSS** - Styling
-- **Framer Motion** - Animations
-- **Recharts** - Data visualization
-- **Axios** - HTTP client
-
-### Backend
-- **FastAPI** - Web framework
-- **Google Gemini (FREE)** - AI capabilities
-- **Pydantic** - Data validation
-- **Uvicorn** - ASGI server
-- **Python 3.9+** - Programming language
-
-## 🎨 Design Features
-- Glassmorphism UI design
-- Smooth animations and transitions
-- Responsive layout (mobile-friendly)
-- Dark theme optimized
-- Gradient backgrounds
-- Interactive components
-
-## 🔮 Future Enhancements
-- [ ] Real flight API integration (Amadeus/Skyscanner)
-- [ ] Actual hotel booking via APIs
-- [ ] PDF itinerary export
-- [ ] User authentication & profiles
-- [ ] Save and share trips
-- [ ] Multi-language support
-- [ ] Weather integration
-- [ ] Currency conversion
-- [ ] Review and rating system
-- [ ] Social sharing features
-
-## 📝 Environment Variables
-
-### Backend (.env)
-```env
-GOOGLE_AI_API_KEY=your_google_ai_studio_api_key
-```
-
-**Get your FREE API key:** https://makersuite.google.com/app/apikey
-
-**No credit card required!** Perfect for college projects and testing.
-
-## 🐛 Troubleshooting
-
-### Backend Issues
-- **Import errors**: Activate virtual environment
-- **API errors**: Check OpenAI API key validity
-- **Port conflicts**: Ensure port 8000 is free
-
-### Frontend Issues
-- **Connection errors**: Verify backend is running
-- **Build errors**: Clear node_modules and reinstall
-- **CORS errors**: Check backend CORS settings
-
-### Performance
-- AI requests take 5-30 seconds
-- Hotel generation: ~10-15 seconds
-- Itinerary generation: ~15-30 seconds
-- Be patient with AI processing
-
-## 📄 License
-MIT License - feel free to use for personal or commercial projects
-
-## 🤝 Contributing
-Contributions welcome! Please feel free to submit issues and pull requests.
-
-## 📧 Support
-- Check `/docs` endpoint for API documentation
-- Review console logs for debugging
-- Check network tab for API responses
-
-## 🙏 Acknowledgments
-- Google AI Studio for free Gemini API
-- React & FastAPI communities
-- All open-source contributors
+## Troubleshooting
+- Backend won't start: activate backend virtualenv and ensure `backend/.env` contains required vars and `MONGODB_URI` is reachable.
+- Frontend errors: run `npm run typecheck` and `npm run lint` to locate TypeScript issues.
 
 ---
 
-**Built with ❤️ using FREE Google Gemini AI**
+License: MIT
 
-For detailed setup instructions, see [GOOGLE_AI_SETUP.md](GOOGLE_AI_SETUP.md)
-For quick start guide, see [QUICKSTART.md](QUICKSTART.md)

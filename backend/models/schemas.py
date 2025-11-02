@@ -1,14 +1,14 @@
 from pydantic import BaseModel, Field
-from typing import List, Optional
-from datetime import date
+from typing import List, Optional, Union
+from datetime import date, datetime
 
 
 class TripRequest(BaseModel):
     trip_type: str = Field(..., description="Type of trip: luxurious, adventurous, family, budget, cultural")
     origin: str = Field(..., description="Origin city - where user is traveling from")
     destination: str = Field(..., description="Destination city or location")
-    start_date: date = Field(..., description="Trip start date")
-    end_date: date = Field(..., description="Trip end date")
+    start_date: Union[date, str] = Field(..., description="Trip start date")
+    end_date: Union[date, str] = Field(..., description="Trip end date")
     budget: float = Field(..., gt=0, description="Total budget in INR")
     adults: int = Field(default=2, ge=1, description="Number of adults")
     children: int = Field(default=0, ge=0, description="Number of children")
@@ -120,3 +120,47 @@ class TripSummary(BaseModel):
     transport: Optional[TransportMode] = None
     itinerary: Optional[ItineraryResponse] = None
     total_estimated_cost: float
+
+
+# Trip History models for MongoDB
+class SavedTrip(BaseModel):
+    id: Optional[str] = Field(None, description="Trip ID")
+    user_id: str = Field(..., description="User identifier")
+    trip: TripRequest
+    budget: BudgetResponse
+    hotel: Optional[Hotel] = None
+    transport: Optional[TransportMode] = None
+    itinerary: Optional[ItineraryResponse] = None
+    created_at: Union[datetime, str] = Field(default_factory=datetime.utcnow)
+    updated_at: Union[datetime, str] = Field(default_factory=datetime.utcnow)
+    
+    class Config:
+        populate_by_name = True
+        json_encoders = {
+            datetime: lambda v: v.isoformat()
+        }
+
+
+class SaveTripRequest(BaseModel):
+    user_id: str
+    trip: TripRequest
+    budget: BudgetResponse
+    hotel: Optional[Hotel] = None
+    transport: Optional[TransportMode] = None
+    itinerary: Optional[ItineraryResponse] = None
+
+
+class UpdateTripRequest(BaseModel):
+    trip: Optional[TripRequest] = None
+    budget: Optional[BudgetResponse] = None
+    hotel: Optional[Hotel] = None
+    transport: Optional[TransportMode] = None
+    itinerary: Optional[ItineraryResponse] = None
+
+
+class TripListResponse(BaseModel):
+    trips: List[SavedTrip]
+    total: int
+    page: int
+    limit: int
+

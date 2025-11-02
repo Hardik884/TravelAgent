@@ -1,5 +1,6 @@
 import google.generativeai as genai
-from typing import List
+import logging
+from typing import List, Dict
 from models.schemas import HotelSearchRequest, HotelSearchResponse, Hotel
 from config import settings
 import json
@@ -21,41 +22,220 @@ class HotelAgent:
             generation_config={
                 'temperature': 0.8,
                 'max_output_tokens': 4000,
+            },
+            safety_settings={
+                'HARM_CATEGORY_HARASSMENT': 'BLOCK_NONE',
+                'HARM_CATEGORY_HATE_SPEECH': 'BLOCK_NONE',
+                'HARM_CATEGORY_SEXUALLY_EXPLICIT': 'BLOCK_NONE',
+                'HARM_CATEGORY_DANGEROUS_CONTENT': 'BLOCK_NONE'
             }
         )
         self.rapidapi_key = getattr(settings, 'rapidapi_key', None)
+        self.logger = logging.getLogger(__name__)
         
         if self.rapidapi_key:
-            print(f"🔑 RapidAPI Key loaded: {self.rapidapi_key[:10]}...{self.rapidapi_key[-5:]}")
+            # Debug: don't expose full key in logs, only indicate presence
+            self.logger.debug("RapidAPI key present (masked)")
         else:
-            print("⚠️ No RapidAPI key found in settings")
+            self.logger.warning("No RapidAPI key found in settings")
     
     def search_hotels(self, request: HotelSearchRequest) -> HotelSearchResponse:
         """
+        Search hotels using HYBRID approach:
+        1. Get REAL hotel names/locations from Amadeus
+        2. Generate realistic AI pricing based on hotel tier and location
         """
-        # Try to get real hotels from Booking.com API
-        if self.rapidapi_key:
-            try:
-                hotels = self._search_real_hotels(request)
-                if hotels and len(hotels) > 0:
-                    print(f"✅ Retrieved {len(hotels)} REAL hotels from Booking.com API")
-                    return HotelSearchResponse(
-                        hotels=hotels,
-                        total_count=len(hotels)
+        # Debug: print incoming request summary for troubleshooting
+        try:
+            self.logger.debug("Hotel search requested: %s", {
+                'destination': request.destination,
+                'check_in': getattr(request.check_in, 'isoformat', lambda: request.check_in)(),
+                'check_out': getattr(request.check_out, 'isoformat', lambda: request.check_out)(),
+                'adults': request.adults,
+                'children': request.children,
+                'max_price': request.max_price,
+                'trip_type': request.trip_type,
+            })
+        except Exception:
+            # Safe fallback logging
+            self.logger.debug("Hotel search requested: destination=%s max_price=%s", request.destination, request.max_price)
+        # Try Amadeus API for real hotel names and locations
+        try:
+            from agents.amadeus_integration import amadeus_service
+            
+            # Get city code
+            city_code = amadeus_service.get_city_code(request.destination)
+            
+            if city_code and amadeus_service.client:
+                self.logger.debug("Fetching REAL hotel names from Amadeus: %s (%s)", request.destination, city_code)
+                
+                # Get real hotel directory (names, locations) - reduced for speed
+                real_hotels_list = amadeus_service.get_hotels_list(
+                    city_code=city_code,
+                    max_results=10  # Reduced from 15 for faster response
+                )
+                
+                if real_hotels_list and len(real_hotels_list) > 0:
+                    self.logger.debug("Got %d real hotels from Amadeus", len(real_hotels_list))
+                    
+                    # Calculate budget constraints
+                    nights = (request.check_out - request.check_in).days
+                    # Frontend sends total accommodation budget as max_price, which IS the per-night budget
+                    max_price_per_night = request.max_price if request.max_price else 8000
+                    
+                    self.logger.debug("Using per-night budget: %s for %d nights", max_price_per_night, nights)
+                    
+                    # Generate AI pricing for real hotels
+                    hotels = self._generate_pricing_for_real_hotels(
+                        real_hotels_list,
+                        request,
+                        max_price_per_night
                     )
-            except Exception as e:
-                print(f"⚠️ Real API failed: {e}")
-        else:
-            print("ℹ️ No RapidAPI key found. Add RAPIDAPI_KEY to .env for REAL hotel data")
+                    
+                    if hotels:
+                        self.logger.debug("Created %d hotels with REAL names + AI pricing", len(hotels))
+                        return HotelSearchResponse(
+                            hotels=hotels,
+                            total_count=len(hotels)
+                        )
+                else:
+                    self.logger.warning("Amadeus returned empty hotel list for destination: %s", request.destination)
         
-        # Fallback to realistic data
-        hotels = self._generate_fallback_hotels(request, 
-                                                request.max_price / max((request.check_out - request.check_in).days, 1))
+        except ImportError:
+            self.logger.warning("Amadeus service not available, using generated data")
+        except Exception as e:
+            self.logger.exception("Hotel search error: %s", e)
+
+        # Fallback to fully generated realistic data
+        self.logger.info("Falling back to generated hotels for: %s", request.destination)
+        # Frontend sends total accommodation budget as max_price, which IS the per-night budget
+        max_price_per_night = request.max_price if request.max_price else 5000
+        nights = (request.check_out - request.check_in).days
+        self.logger.debug("Using per-night budget: %s for %d nights", max_price_per_night, nights)
         
+        hotels = self._generate_fallback_hotels(request, max_price_per_night)
+
         return HotelSearchResponse(
             hotels=hotels,
             total_count=len(hotels)
         )
+    
+    def _generate_pricing_for_real_hotels(
+        self, 
+        real_hotels: List[Dict], 
+        request: HotelSearchRequest,
+        max_price_per_night: float
+    ) -> List[Hotel]:
+        """
+        Generate realistic AI pricing for real hotel names from Amadeus
+        Uses the SAME pricing distribution as fallback hotels for consistency
+        """
+        hotels = []
+        
+        # Filter out test/dummy hotels from Amadeus test environment
+        test_keywords = ['test', 'testing', 'dummy', 'sample', 'example', 'fake']
+        
+        # Filter valid hotels
+        valid_hotels = []
+        for hotel_data in real_hotels:
+            hotel_name = hotel_data['name']
+            hotel_name_lower = hotel_name.lower()
+            
+            # Skip test/dummy hotels from Amadeus sandbox
+            if any(keyword in hotel_name_lower for keyword in test_keywords):
+                self.logger.debug("Skipping test hotel: %s", hotel_name)
+                continue
+            
+            valid_hotels.append(hotel_data)
+        
+        if not valid_hotels:
+            self.logger.warning("No valid hotels after filtering test data")
+            return []
+        
+        # Use the same pricing distribution as fallback hotels
+        hotels_to_generate = min(10, len(valid_hotels))
+        
+        # Calculate price distribution - from 25% to 100% of max budget
+        min_price = max_price_per_night * 0.25
+        
+        self.logger.debug("Generating Amadeus hotel prices: %s to %s", f"₹{min_price:.0f}", f"₹{max_price_per_night:.0f}")
+        
+        for i in range(hotels_to_generate):
+            hotel_data = valid_hotels[i]
+            
+            # Distribute prices evenly across the range with added randomness
+            # This ensures EVERY hotel has a different price
+            position = i / max(hotels_to_generate - 1, 1)  # 0 to 1
+            
+            # Calculate base target price for this position
+            target_price = min_price + (position * (max_price_per_night - min_price))
+            
+            # Add unique randomness to each hotel (±8% of its target)
+            unique_variance = target_price * random.uniform(-0.08, 0.08)
+            price = target_price + unique_variance
+            
+            # Add small random jitter to prevent identical prices
+            price += random.randint(-50, 150)
+            
+            # Ensure price stays within bounds
+            price = max(min_price, min(price, max_price_per_night))
+            
+            # Light rounding only - keeps prices distinct
+            if price > 3000:
+                price = round(price / 10) * 10  # Round to nearest 10
+            else:
+                price = round(price / 5) * 5  # Round to nearest 5
+            
+            self.logger.debug("Hotel %d price: %s (position %.1f%%, target %s)", i+1, f"₹{price:.0f}", position*100, f"₹{target_price:.0f}")
+            
+            # Determine category based on position in price range
+            price_ratio = (price - min_price) / (max_price_per_night - min_price)
+            
+            if price_ratio > 0.75:
+                category = "luxury"
+                rating = random.uniform(4.5, 4.9)
+                tag = "Luxury Pick"
+                amenities = ["Free WiFi", "Swimming Pool", "Spa", "Fine Dining", "Gym", "Concierge"]
+            elif price_ratio > 0.5:
+                category = "premium"
+                rating = random.uniform(4.0, 4.5)
+                tag = "Best Value"
+                amenities = ["Free WiFi", "Restaurant", "Gym", "Room Service", "Business Center"]
+            elif price_ratio > 0.3:
+                category = "midrange"
+                rating = random.uniform(3.7, 4.2)
+                tag = "Family Friendly"
+                amenities = ["Free WiFi", "Restaurant", "Room Service", "AC", "TV"]
+            else:
+                category = "budget"
+                rating = random.uniform(3.4, 3.9)
+                tag = "Budget Friendly"
+                amenities = ["Free WiFi", "AC", "TV", "Breakfast"]
+            
+            # Get location info
+            address = hotel_data.get('address', {})
+            city_name = address.get('cityName', request.destination)
+            
+            # Create hotel object
+            hotel = Hotel(
+                id=f"amadeus_{hotel_data.get('hotel_id', i)}",
+                name=hotel_data['name'],
+                price=round(price, 0),
+                rating=round(rating, 1),
+                image=self._get_hotel_image(i),
+                location=city_name,
+                amenities=amenities[:5],
+                description=f"Located in {city_name}. Real hotel with AI-estimated pricing.",
+                tag=tag
+            )
+            hotels.append(hotel)
+        
+        # Sort by price
+        hotels.sort(key=lambda x: x.price)
+        
+        self.logger.debug("Generated %d Amadeus hotels with prices", len(hotels))
+        
+        return hotels
     
     def _search_real_hotels(self, request: HotelSearchRequest) -> List[Hotel]:
         """
@@ -65,10 +245,10 @@ class HotelAgent:
         search_url = "https://booking-com.p.rapidapi.com/v1/hotels/locations"
         
         clean_destination = request.destination.strip()
-        
-        print(f"🔍 Searching for destination: {clean_destination}")
-        print(f"🔑 Using API key: {self.rapidapi_key[:10]}...{self.rapidapi_key[-5:]}")
-        
+
+        self.logger.debug("Searching for destination: %s", clean_destination)
+        self.logger.debug("RapidAPI key present (masked)")
+
         search_params = {
             "name": clean_destination,
             "locale": "en-gb"
@@ -77,14 +257,13 @@ class HotelAgent:
             "X-RapidAPI-Key": self.rapidapi_key,
             "X-RapidAPI-Host": "booking-com.p.rapidapi.com"
         }
-        
         try:
-            print(f"📡 Making API call to: {search_url}")
+            self.logger.debug("Making API call to: %s", search_url)
             search_response = requests.get(search_url, headers=search_headers, params=search_params, timeout=10)
-            print(f"📥 Response status: {search_response.status_code}")
+            self.logger.debug("Response status: %s", search_response.status_code)
             search_response.raise_for_status()
             locations = search_response.json()
-            print(f"✅ Found {len(locations)} locations")
+            self.logger.debug("Found %d locations from rapidapi", len(locations))
         except requests.exceptions.HTTPError as e:
             if e.response.status_code == 403:
                 raise Exception(f"❌ API Key Invalid or Subscription Required. Visit: https://rapidapi.com/apidojo/api/booking")
@@ -184,7 +363,7 @@ class HotelAgent:
                     tag=tag
                 ))
             except Exception as e:
-                print(f"Error parsing hotel {idx}: {e}")
+                self.logger.debug("Error parsing hotel %d: %s", idx, e)
                 continue
         
         return hotels
@@ -252,19 +431,13 @@ Rules:
             )
             
             if not hasattr(response, 'text') or not response.text:
-                print("No valid response from AI, using fallback")
+                self.logger.debug("No valid response from AI, using fallback")
                 return self._generate_fallback_hotels(request, max_price_per_night)[:15]
             
             content = response.text.strip()
             
             # Clean markdown
             content = content.replace("```json", "").replace("```", "").strip()
-            
-            # Extract JSON array
-            if '[' in content and ']' in content:
-                start = content.index('[')
-                end = content.rindex(']') + 1
-                content = content[start:end]
             
             hotels_data = json.loads(content)
             
@@ -288,56 +461,60 @@ Rules:
                         tag=hotel_data.get("tag", "Recommended")
                     ))
                 except Exception as e:
-                    print(f"Error parsing hotel {idx}: {e}")
+                    self.logger.debug("Error parsing hotel %d: %s", idx, e)
                     continue
             
             # If AI generated fewer than 10 hotels, pad with fallback
             if len(hotels) < 10:
-                print(f"Only got {len(hotels)} hotels from AI, adding fallback hotels")
+                self.logger.info("AI returned %d hotels; adding fallback hotels", len(hotels))
                 fallback_hotels = self._generate_fallback_hotels(request, max_price_per_night)
                 hotels.extend(fallback_hotels[:(15-len(hotels))])
             
             return hotels[:15]  # Return 15 hotels for faster loading
-            
         except Exception as e:
-            print(f"Error generating hotels with AI: {e}")
+            self.logger.exception("Error generating hotels with AI: %s", e)
             return self._generate_fallback_hotels(request, max_price_per_night)[:15]
     
     def _generate_fallback_hotels(self, request: HotelSearchRequest, max_price: float) -> List[Hotel]:
         """
         Generate realistic hotel data based on actual Indian hotel chains and properties
+        with varied and realistic pricing
         """
         hotels = []
         
-        # Real Indian hotel chains and properties
+        # Real Indian hotel chains and properties with more realistic price ranges
         hotel_chains = {
             "luxury": [
-                {"name": "Taj Palace", "base_price": 8000, "rating": 4.7},
-                {"name": "The Oberoi", "base_price": 12000, "rating": 4.8},
-                {"name": "ITC Grand", "base_price": 9000, "rating": 4.6},
-                {"name": "Leela Palace", "base_price": 11000, "rating": 4.8},
-                {"name": "JW Marriott", "base_price": 7500, "rating": 4.6},
+                {"name": "Taj Palace", "base_price": 9500, "variance": 0.25, "rating": 4.7},
+                {"name": "The Oberoi", "base_price": 13500, "variance": 0.20, "rating": 4.8},
+                {"name": "ITC Grand", "base_price": 10200, "variance": 0.22, "rating": 4.6},
+                {"name": "Leela Palace", "base_price": 12800, "variance": 0.18, "rating": 4.8},
+                {"name": "JW Marriott", "base_price": 8200, "variance": 0.28, "rating": 4.6},
+                {"name": "The Ritz-Carlton", "base_price": 15000, "variance": 0.20, "rating": 4.9},
             ],
             "premium": [
-                {"name": "Hyatt Regency", "base_price": 5500, "rating": 4.5},
-                {"name": "Radisson Blu", "base_price": 4500, "rating": 4.4},
-                {"name": "Novotel", "base_price": 4000, "rating": 4.3},
-                {"name": "Holiday Inn", "base_price": 3500, "rating": 4.2},
-                {"name": "Crowne Plaza", "base_price": 5000, "rating": 4.4},
+                {"name": "Hyatt Regency", "base_price": 6200, "variance": 0.30, "rating": 4.5},
+                {"name": "Radisson Blu", "base_price": 5100, "variance": 0.35, "rating": 4.4},
+                {"name": "Novotel", "base_price": 4600, "variance": 0.32, "rating": 4.3},
+                {"name": "Holiday Inn", "base_price": 3900, "variance": 0.38, "rating": 4.2},
+                {"name": "Crowne Plaza", "base_price": 5700, "variance": 0.28, "rating": 4.4},
+                {"name": "Courtyard by Marriott", "base_price": 4800, "variance": 0.33, "rating": 4.3},
             ],
             "midrange": [
-                {"name": "Lemon Tree Hotel", "base_price": 2500, "rating": 4.0},
-                {"name": "Ginger Hotel", "base_price": 2000, "rating": 3.9},
-                {"name": "Treebo Hotels", "base_price": 1800, "rating": 3.8},
-                {"name": "FabHotel", "base_price": 1500, "rating": 3.7},
-                {"name": "Bloom Hotel", "base_price": 2200, "rating": 4.0},
+                {"name": "Lemon Tree Hotel", "base_price": 2800, "variance": 0.40, "rating": 4.0},
+                {"name": "Ginger Hotel", "base_price": 2200, "variance": 0.45, "rating": 3.9},
+                {"name": "Treebo Hotels", "base_price": 1950, "variance": 0.48, "rating": 3.8},
+                {"name": "FabHotel", "base_price": 1650, "variance": 0.50, "rating": 3.7},
+                {"name": "Bloom Hotel", "base_price": 2450, "variance": 0.42, "rating": 4.0},
+                {"name": "Keys Hotels", "base_price": 3100, "variance": 0.38, "rating": 4.1},
             ],
             "budget": [
-                {"name": "OYO Flagship", "base_price": 1200, "rating": 3.5},
-                {"name": "Collection O", "base_price": 1000, "rating": 3.6},
-                {"name": "Zostel", "base_price": 800, "rating": 4.2},
-                {"name": "GoStays", "base_price": 900, "rating": 3.4},
-                {"name": "Spot ON", "base_price": 1100, "rating": 3.5},
+                {"name": "OYO Flagship", "base_price": 1350, "variance": 0.55, "rating": 3.5},
+                {"name": "Collection O", "base_price": 1150, "variance": 0.60, "rating": 3.6},
+                {"name": "Zostel", "base_price": 850, "variance": 0.35, "rating": 4.2},
+                {"name": "GoStays", "base_price": 980, "variance": 0.58, "rating": 3.4},
+                {"name": "Spot ON", "base_price": 1220, "variance": 0.52, "rating": 3.5},
+                {"name": "Capital O", "base_price": 1450, "variance": 0.48, "rating": 3.7},
             ]
         }
         
@@ -346,8 +523,12 @@ Rules:
             "mumbai": ["Colaba", "Bandra", "Andheri", "Powai", "Lower Parel"],
             "delhi": ["Connaught Place", "Aerocity", "Karol Bagh", "Paharganj", "Dwarka"],
             "bangalore": ["MG Road", "Whitefield", "Indiranagar", "Koramangala", "Electronic City"],
+            "bengaluru": ["MG Road", "Whitefield", "Indiranagar", "Koramangala", "Electronic City"],
             "chennai": ["T Nagar", "Anna Salai", "Egmore", "Mylapore", "OMR"],
             "jaipur": ["City Palace Area", "MI Road", "Bani Park", "Malviya Nagar", "Vaishali Nagar"],
+            "vellore": ["Katpadi", "Fort Area", "Gandhi Nagar", "CMC Campus", "Sathuvachari"],
+            "puducherry": ["White Town", "Beach Road", "Auroville", "French Quarter", "Promenade"],
+            "pondicherry": ["White Town", "Beach Road", "Auroville", "French Quarter", "Promenade"],
             "default": ["City Center", "Downtown", "Near Station", "Airport Road", "Main Street"]
         }
         
@@ -355,20 +536,27 @@ Rules:
         dest_key = request.destination.lower()
         dest_locations = locations.get(dest_key, locations["default"])
         
-        # Determine hotel categories based on budget
+        # Determine hotel categories based on budget with better distribution
         all_hotels = []
         if max_price > 8000:
+            # High budget - mix of luxury and premium
             all_hotels.extend(hotel_chains["luxury"] * 2)
-            all_hotels.extend(hotel_chains["premium"])
-        elif max_price > 4000:
             all_hotels.extend(hotel_chains["premium"] * 2)
             all_hotels.extend(hotel_chains["midrange"])
-        elif max_price > 1500:
+        elif max_price > 4000:
+            # Medium-high budget - premium and midrange
+            all_hotels.extend(hotel_chains["premium"] * 3)
             all_hotels.extend(hotel_chains["midrange"] * 2)
             all_hotels.extend(hotel_chains["budget"])
-        else:
+        elif max_price > 2000:
+            # Medium budget - midrange focused
+            all_hotels.extend(hotel_chains["midrange"] * 3)
+            all_hotels.extend(hotel_chains["premium"])
             all_hotels.extend(hotel_chains["budget"] * 2)
-            all_hotels.extend(hotel_chains["midrange"])
+        else:
+            # Low budget - budget and economy midrange
+            all_hotels.extend(hotel_chains["budget"] * 3)
+            all_hotels.extend(hotel_chains["midrange"] * 2)
         
         # Shuffle for variety
         random.shuffle(all_hotels)
@@ -389,36 +577,103 @@ Rules:
             "budget": "Budget Friendly"
         }
         
-        for i in range(min(15, len(all_hotels))):
+        # Destination price multipliers (some cities are more expensive)
+        destination_multipliers = {
+            "mumbai": 1.3,
+            "delhi": 1.2,
+            "bangalore": 1.25,
+            "bengaluru": 1.25,
+            "goa": 1.4,
+            "jaipur": 0.9,
+            "chennai": 1.1,
+            "puducherry": 0.95,
+            "pondicherry": 0.95,
+            "vellore": 0.75,
+            "default": 1.0
+        }
+        
+        dest_multiplier = destination_multipliers.get(dest_key, destination_multipliers["default"])
+        
+        # Trip type multipliers
+        trip_multipliers = {
+            "luxurious": 1.35,
+            "adventure": 1.0,
+            "budget": 0.75,
+            "family": 1.15,
+            "romantic": 1.25,
+            "business": 1.2
+        }
+        
+        trip_multiplier = trip_multipliers.get(request.trip_type.lower(), 1.0)
+        
+        # Generate 10 hotels spanning the FULL price range from budget to max_price
+        hotels_to_generate = min(10, len(all_hotels))
+        
+        # Calculate price distribution - from 25% to 100% of max budget
+        min_price = max_price * 0.25
+        
+        self.logger.debug("Generating hotels with price range: %s to %s", f"₹{min_price:.0f}", f"₹{max_price:.0f}")
+        
+        for i in range(hotels_to_generate):
             hotel_data = all_hotels[i]
             
-            # Adjust price based on destination and randomness
-            price = hotel_data["base_price"] * random.uniform(0.8, 1.2)
+            # Distribute prices evenly across the range with added randomness
+            # This ensures EVERY hotel has a different price
+            position = i / max(hotels_to_generate - 1, 1)  # 0 to 1
             
-            # Ensure within budget
-            if price > max_price * 1.2:
-                price = max_price * random.uniform(0.7, 0.9)
+            # Calculate base target price for this position
+            target_price = min_price + (position * (max_price - min_price))
             
-            # Determine category
-            category = "budget"
-            if price > 8000:
+            # Add unique randomness to each hotel (±8% of its target)
+            unique_variance = target_price * random.uniform(-0.08, 0.08)
+            price = target_price + unique_variance
+            
+            # Add small random jitter to prevent identical prices
+            price += random.randint(-50, 150)
+            
+            # Ensure price stays within bounds
+            price = max(min_price, min(price, max_price))
+            
+            # Light rounding only - keeps prices distinct
+            if price > 3000:
+                price = round(price / 10) * 10  # Round to nearest 10
+            else:
+                price = round(price / 5) * 5  # Round to nearest 5
+            
+            self.logger.debug("Hotel %d: %s (position %.1f%%, target %s)", i+1, f"₹{price:.0f}", position*100, f"₹{target_price:.0f}")
+            
+            # Determine category based on position in price range
+            price_ratio = (price - min_price) / (max_price - min_price)
+            
+            if price_ratio > 0.75:
                 category = "luxury"
-            elif price > 4000:
+                rating = random.uniform(4.5, 4.9)
+            elif price_ratio > 0.5:
                 category = "premium"
-            elif price > 1500:
+                rating = random.uniform(4.0, 4.5)
+            elif price_ratio > 0.3:
                 category = "midrange"
+                rating = random.uniform(3.7, 4.2)
+            else:
+                category = "budget"
+                rating = random.uniform(3.4, 3.9)
             
             hotels.append(Hotel(
                 id=f"hotel_{i+1}",
                 name=f"{hotel_data['name']} {request.destination}",
                 price=round(price, 0),
-                rating=hotel_data["rating"] + random.uniform(-0.2, 0.2),
+                rating=round(rating, 1),
                 image=self._get_hotel_image(i),
                 location=random.choice(dest_locations),
                 amenities=random.choice(amenities_pool),
                 description=f"Well-appointed {category} hotel in {request.destination}, perfect for {request.trip_type} travelers.",
                 tag=tags_mapping[category]
             ))
+        
+        # Sort by price to show budget options first
+        hotels.sort(key=lambda x: x.price)
+        
+        self.logger.debug("Generated %d hotels with prices", len(hotels))
         
         return hotels
     

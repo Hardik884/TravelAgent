@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Search, SlidersHorizontal, Loader2 } from 'lucide-react';
+import { Search, SlidersHorizontal } from 'lucide-react';
 import HotelCard from '../components/HotelCard';
 import { useTripContext } from '../context/TripContext';
 import { hotelAPI } from '../utils/api';
@@ -46,29 +46,31 @@ export default function Hotels() {
       const days = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
       const validDays = Math.max(days, 1);
       
-      const maxPricePerNight = accommodationBudget 
-        ? accommodationBudget.value / validDays
-        : 5000;
+      // Send TOTAL accommodation budget - backend will divide by nights
+      const totalAccommodationBudget = accommodationBudget?.value || 5000 * validDays;
 
-      console.log('Searching hotels with:', {
-        destination: tripData.destination,
-        days: validDays,
-        maxPricePerNight,
-        accommodationBudget: accommodationBudget?.value
-      });
+      // Search parameters prepared for hotel search (debug logs removed)
+
+      // Normalize some common destination variants (Pondicherry -> Puducherry)
+      const normalizedDestination = (
+        tripData.destination || ''
+      ).toString().trim();
+
+      const destNormalizedForSearch = /pondicherry/i.test(normalizedDestination)
+        ? 'Puducherry'
+        : normalizedDestination;
 
       const searchRequest = {
-        destination: tripData.destination,
+        destination: destNormalizedForSearch,
         check_in: tripData.start_date,
         check_out: tripData.end_date,
         adults: tripData.adults,
         children: tripData.children,
-        max_price: maxPricePerNight * 1.5, // Allow some flexibility
+        max_price: totalAccommodationBudget, // Send TOTAL budget, backend divides by nights
         trip_type: tripData.trip_type,
       };
 
-      const response = await hotelAPI.search(searchRequest);
-      console.log('Hotels received:', response.hotels.length);
+  const response = await hotelAPI.search(searchRequest);
       setHotels(response.hotels);
       setPriceRange([0, Math.max(...response.hotels.map(h => h.price)) || 20000]);
     } catch (err) {
@@ -101,32 +103,46 @@ export default function Hotels() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
+      <div className="loading-container">
         <div className="text-center">
-          <Loader2 className="w-12 h-12 text-teal-400 animate-spin mx-auto mb-4" />
-          <p className="text-white text-lg">Searching for perfect hotels...</p>
+          <div className="relative inline-block">
+            <div className="loading-spinner" />
+            <div className="absolute inset-0 flex items-center justify-center">
+              <span className="text-3xl">🏨</span>
+            </div>
+          </div>
+          <div className="loading-dots justify-center">
+            <div className="loading-dot" />
+            <div className="loading-dot" />
+            <div className="loading-dot" />
+          </div>
+          <p className="loading-text">Finding perfect hotels for you</p>
+          <p className="text-gray-400 text-sm mt-2">Analyzing {tripData?.destination} accommodations...</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen relative">
-      <div className="absolute inset-0 bg-cover bg-center opacity-30" style={{ backgroundImage: "linear-gradient(rgba(4,6,12,0.45), rgba(2,4,8,0.6)), url('https://images.unsplash.com/photo-1501117716987-c8e24d3c9b4a?auto=format&fit=crop&w=1800&q=80')" }} />
-      <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
+    <div className="page-container hotels-bg">
+      <div className="page-overlay" />
+      <div className="page-content max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5 }}
         >
           <div className="flex items-center justify-between mb-8">
-            <h1 className="text-4xl font-extrabold text-white">Choose Your Stay</h1>
+            <div>
+              <h1 className="text-5xl font-extrabold text-white mb-2">Choose Your Stay</h1>
+              <p className="text-gray-400">Curated accommodations for your journey</p>
+            </div>
             {selectedHotel && (
               <button
                 onClick={handleContinue}
-                className="glass-button px-5 py-2 rounded-md font-semibold"
+                className="glass-button px-6 py-3 rounded-xl font-semibold hover:scale-105 transition-transform"
               >
-                Continue to Transport
+                Continue to Transport →
               </button>
             )}
           </div>

@@ -1,6 +1,7 @@
-import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip } from 'recharts';
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
+import { motion } from 'framer-motion';
 
-const COLORS = ['#06b6d4', '#3b82f6', '#8b5cf6', '#ec4899', '#f59e0b'];
+const COLORS = ['#14b8a6', '#06b6d4', '#3b82f6', '#8b5cf6', '#ec4899', '#f59e0b'];
 
 interface BudgetData {
   total: number;
@@ -17,10 +18,35 @@ interface Props {
 
 export default function BudgetChart({ data }: Props) {
   return (
-    <div className="glass-scope rounded-xl p-6 shadow-xl">
-      <h3 className="text-xl font-semibold text-white mb-6">Budget Breakdown</h3>
+    <motion.div 
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.5 }}
+      className="budget-chart-container"
+    >
+      <div className="flex items-center gap-3 mb-6">
+        <div className="budget-icon">
+          <span className="text-2xl">💰</span>
+        </div>
+        <div>
+          <h3 className="text-2xl font-bold text-white">Budget Breakdown</h3>
+          <p className="text-sm text-gray-400">Smart allocation for your trip</p>
+        </div>
+      </div>
+      
       <div className="grid md:grid-cols-2 gap-8 items-center">
-        <div className="h-64">
+        <motion.div 
+          initial={{ scale: 0.8, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          transition={{ duration: 0.6, delay: 0.2 }}
+          className="h-72 relative"
+        >
+          <div className="absolute inset-0 flex items-center justify-center">
+            <div className="budget-total-center">
+              <p className="text-sm text-gray-400 mb-1">Total Budget</p>
+              <p className="text-3xl font-bold text-white">₹{data.total.toLocaleString()}</p>
+            </div>
+          </div>
           <ResponsiveContainer width="100%" height="100%">
             <PieChart>
               <Pie
@@ -28,44 +54,75 @@ export default function BudgetChart({ data }: Props) {
                 cx="50%"
                 cy="50%"
                 labelLine={false}
-                outerRadius={80}
+                innerRadius={60}
+                outerRadius={100}
                 fill="#8884d8"
                 dataKey="value"
-                label={({ name, percentage }) => `${percentage}%`}
+                label={({ percentage }) => `${percentage}%`}
+                paddingAngle={2}
               >
                 {data.breakdown.map((entry, index) => (
-                  <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                  <Cell 
+                    key={`cell-${index}`} 
+                    fill={COLORS[index % COLORS.length]}
+                    strokeWidth={2}
+                    stroke="rgba(15,23,42,0.8)"
+                  />
                 ))}
               </Pie>
               <Tooltip
-                contentStyle={{ backgroundColor: 'rgba(15,23,42,0.9)', border: 'none', borderRadius: '8px' }}
+                contentStyle={{ 
+                  backgroundColor: 'rgba(15,23,42,0.95)', 
+                  border: '1px solid rgba(20,184,166,0.3)',
+                  borderRadius: '12px',
+                  padding: '12px',
+                  boxShadow: '0 8px 24px rgba(0,0,0,0.4)'
+                }}
                 formatter={(value: number) => `₹${value.toLocaleString()}`}
+                labelStyle={{ color: '#5eead4', fontWeight: 'bold', marginBottom: '4px' }}
+                itemStyle={{ color: '#e6eef4' }}
               />
             </PieChart>
           </ResponsiveContainer>
-        </div>
+        </motion.div>
+        
         <div className="space-y-3">
-          <div className="mb-4">
-            <p className="muted text-sm">Total Budget</p>
-            <p className="text-3xl font-bold text-white">₹{data.total.toLocaleString()}</p>
-          </div>
           {data.breakdown.map((item, index) => (
-            <div key={item.name} className="flex items-center justify-between p-3 bg-white/6 rounded-lg">
-              <div className="flex items-center gap-3">
+            <motion.div
+              key={item.name}
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ duration: 0.4, delay: 0.1 * index }}
+              className="budget-item group"
+            >
+              <div className="flex items-center gap-3 flex-1">
                 <div
-                  className="w-3 h-3 rounded-full"
+                  className="budget-color-indicator"
                   style={{ backgroundColor: COLORS[index % COLORS.length] }}
                 />
-                <span className="text-gray-100">{item.name}</span>
+                <div className="flex-1">
+                  <span className="text-white font-semibold group-hover:text-teal-200 transition-colors">
+                    {item.name}
+                  </span>
+                  <div className="budget-progress-bar mt-2">
+                    <motion.div
+                      initial={{ width: 0 }}
+                      animate={{ width: `${item.percentage}%` }}
+                      transition={{ duration: 1, delay: 0.2 * index }}
+                      className="budget-progress-fill"
+                      style={{ backgroundColor: COLORS[index % COLORS.length] }}
+                    />
+                  </div>
+                </div>
               </div>
               <div className="text-right">
-                <p className="text-white font-semibold">₹{item.value.toLocaleString()}</p>
-                <p className="text-gray-300 text-xs">{item.percentage}%</p>
+                <p className="text-white font-bold text-lg">₹{item.value.toLocaleString()}</p>
+                <p className="budget-percentage">{item.percentage}%</p>
               </div>
-            </div>
+            </motion.div>
           ))}
         </div>
       </div>
-    </div>
+    </motion.div>
   );
 }

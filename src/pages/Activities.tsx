@@ -29,16 +29,26 @@ export default function Activities() {
     setError(null);
     
     try {
+      // Get both activities and food budgets
       const activitiesBudget = budgetData.breakdown.find(
         item => item.name.toLowerCase() === 'activities'
       );
+      
+      const foodBudget = budgetData.breakdown.find(
+        item => item.name.toLowerCase() === 'food'
+      );
+
+      // Combine activities and food budget for itinerary planning
+      const combinedBudget = (activitiesBudget?.value || 0) + (foodBudget?.value || 0);
+      
+  // Generating itinerary using combined activities + food budget
 
       const request = {
         destination: tripData.destination,
         start_date: tripData.start_date,
         end_date: tripData.end_date,
         trip_type: tripData.trip_type,
-        budget_allocation: activitiesBudget?.value || 5000,
+        budget_allocation: combinedBudget, // Send combined activities + food budget
         interests: [], // You can enhance this with user preferences
       };
 
@@ -64,48 +74,58 @@ export default function Activities() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
+      <div className="loading-container">
         <div className="text-center">
-          <Loader2 className="w-12 h-12 text-teal-400 animate-spin mx-auto mb-4" />
-          <p className="text-white text-lg">Creating your perfect itinerary...</p>
+          <div className="relative inline-block">
+            <div className="loading-spinner" />
+            <div className="absolute inset-0 flex items-center justify-center">
+              <span className="text-3xl">🗺️</span>
+            </div>
+          </div>
+          <div className="loading-dots justify-center">
+            <div className="loading-dot" />
+            <div className="loading-dot" />
+            <div className="loading-dot" />
+          </div>
+          <p className="loading-text">Creating your perfect itinerary</p>
+          <p className="text-gray-400 text-sm mt-2">Personalizing activities for {tripData?.destination}...</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen">
-      <div className="relative">
-        <div className="absolute inset-0 bg-cover bg-center opacity-40" style={{ backgroundImage: "linear-gradient(rgba(6,8,15,0.25), rgba(3,6,12,0.35)), url('https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=1650&q=80')" }} />
-        <div className="relative max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5 }}
-          >
-            <div className="flex items-center justify-between mb-8">
-              <div>
-                <h1 className="text-4xl font-extrabold text-white mb-2">Your Itinerary</h1>
-                <p className="muted">Day-by-day activities crafted for your trip</p>
-              </div>
-              <button
-                onClick={handleGenerate}
-                disabled={regenerating}
-                className="glass-button px-5 py-2 rounded-md font-semibold transition-all flex items-center gap-2"
-              >
-                {regenerating ? (
-                  <>
-                    <Loader2 className="w-5 h-5 animate-spin" />
-                    Generating...
-                  </>
-                ) : (
-                  <>
-                    <Sparkles className="w-5 h-5" />
-                    Regenerate
-                  </>
-                )}
-              </button>
+    <div className="page-container activities-bg">
+      <div className="page-overlay" />
+      <div className="page-content max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5 }}
+        >
+          <div className="flex items-center justify-between mb-8">
+            <div>
+              <h1 className="text-5xl font-extrabold text-white mb-2">Your Itinerary</h1>
+              <p className="text-gray-400">Day-by-day activities crafted for your trip</p>
             </div>
+            <button
+              onClick={handleGenerate}
+              disabled={regenerating}
+              className="glass-button px-6 py-3 rounded-xl font-semibold transition-all flex items-center gap-2 hover:scale-105"
+            >
+              {regenerating ? (
+                <>
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                  Generating...
+                </>
+              ) : (
+                <>
+                  <Sparkles className="w-5 h-5" />
+                  Regenerate
+                </>
+              )}
+            </button>
+          </div>
 
             {error && (
               <div className="mb-6 p-4 bg-red-500/20 border border-red-500/50 rounded-lg text-red-300">
@@ -150,15 +170,14 @@ export default function Activities() {
                 <div className="mt-8 flex justify-center">
                   <button
                     onClick={handleContinue}
-                    className="glass-button px-8 py-3 rounded-lg font-semibold"
+                    className="glass-button px-8 py-3 rounded-xl font-semibold hover:scale-105 transition-transform"
                   >
-                    View Summary
+                    View Summary →
                   </button>
                 </div>
               </>
             )}
-          </motion.div>
-        </div>
+        </motion.div>
       </div>
     </div>
   );

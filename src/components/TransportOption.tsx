@@ -14,59 +14,72 @@ export default function TransportOption({ transport, onSelect, selected }: Props
 
   const handleSelect = (index: number) => {
     setSelectedOption(index);
-    onSelect?.(transport);
+    // Pass the transport mode with the selected option attached
+    const transportWithSelection = {
+      ...transport,
+      selectedOption: transport.options[index]
+    };
+    onSelect?.(transportWithSelection);
+  };
+
+  // Clean up the note text to remove API references
+  const cleanNote = (note: string) => {
+    return note
+      .replace(/\s*-\s*Real flight data from Amadeus/i, '')
+      .replace(/\s*\|\s*Real IRCTC Data/i, '')
+      .trim();
   };
 
   return (
-    <div className="glass rounded-xl overflow-hidden shadow-lg transition-all">
+    <div className="transport-card group">
       <div
-        className="p-5 cursor-pointer hover:scale-[1.01] transition-transform"
+        className="transport-header"
         onClick={() => setIsExpanded(!isExpanded)}
       >
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
-            <div className="w-14 h-14 rounded-lg flex items-center justify-center text-3xl" style={{ background: 'linear-gradient(90deg, rgba(20,184,166,0.08), rgba(124,58,237,0.08))' }}>
+            <div className="transport-icon">
               <span>{transport.icon}</span>
             </div>
             <div>
-              <h3 className="text-xl font-semibold text-white">{transport.mode}</h3>
-              <p className="text-gray-300 text-sm">{transport.duration}</p>
+              <h3 className="text-xl font-bold text-white group-hover:text-teal-200 transition-colors">{transport.mode}</h3>
+              <p className="text-gray-300 text-sm mt-1">{transport.duration}</p>
             </div>
           </div>
           <div className="flex items-center gap-4">
             <div className="text-right">
-              <p className="text-white font-medium">{transport.price_range}</p>
-              <p className="text-teal-300 text-sm">{transport.note}</p>
+              <p className="text-white font-bold text-lg">{transport.price_range}</p>
+              <p className="text-teal-300 text-sm font-medium">{cleanNote(transport.note)}</p>
             </div>
             {isExpanded ? (
-              <ChevronUp className="w-5 h-5 text-gray-400" />
+              <ChevronUp className="w-5 h-5 text-teal-300" />
             ) : (
-              <ChevronDown className="w-5 h-5 text-gray-400" />
+              <ChevronDown className="w-5 h-5 text-gray-400 group-hover:text-teal-300 transition-colors" />
             )}
           </div>
         </div>
       </div>
 
       {isExpanded && (
-        <div className="border-t border-white/10 p-5 space-y-3 bg-transparent">
+        <div className="transport-options">
           {transport.options.map((option, index) => (
             <div
               key={index}
-              className={`flex items-center justify-between p-4 rounded-lg transition-all cursor-pointer ${
-                selectedOption === index
-                  ? 'bg-gradient-to-r from-teal-900 to-indigo-900 border-2 border-white/10 text-white'
-                  : 'bg-white/6 hover:bg-white/8 text-gray-100'
+              className={`transport-option ${
+                selectedOption === index ? 'transport-option-selected' : ''
               }`}
               onClick={() => handleSelect(index)}
             >
-              <div>
-                <p className="text-white font-medium">{option.carrier}</p>
+              <div className="flex-1">
+                <p className="text-white font-semibold mb-1">{option.carrier}</p>
                 <p className="text-gray-300 text-sm">{option.time}</p>
               </div>
               <div className="flex items-center gap-3">
-                <p className="text-white font-bold">₹{option.price.toLocaleString()}</p>
+                <p className="text-white font-bold text-lg">₹{option.price.toLocaleString()}</p>
                 {selectedOption === index && (
-                  <Check className="w-5 h-5 text-teal-300" />
+                  <div className="transport-check">
+                    <Check className="w-4 h-4 text-white" />
+                  </div>
                 )}
               </div>
             </div>

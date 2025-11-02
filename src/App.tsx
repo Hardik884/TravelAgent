@@ -8,14 +8,15 @@ import Hotels from './pages/Hotels';
 import Transport from './pages/Transport';
 import Activities from './pages/Activities';
 import Summary from './pages/Summary';
+import TripHistory from './pages/TripHistory';
 
 function App() {
   return (
     <TripProvider>
       <Router>
-        <div className="min-h-screen flex flex-col" style={{ background: 'linear-gradient(180deg, #071022 0%, #061022 45%, #07132a 100%)' }}>
+        <div className="min-h-screen flex flex-col app-background">
           <Navbar />
-          <main className="flex-1 py-8">
+          <main className="flex-1 pt-20">
             <Routes>
               <Route path="/" element={<Home />} />
               <Route path="/trip-planner" element={<TripPlanner />} />
@@ -23,6 +24,7 @@ function App() {
               <Route path="/transport" element={<Transport />} />
               <Route path="/activities" element={<Activities />} />
               <Route path="/summary" element={<Summary />} />
+              <Route path="/trip-history" element={<TripHistory />} />
             </Routes>
           </main>
           <Footer />

@@ -27,6 +27,31 @@ dist-ssr
 .env.*
 !.env.example
 
+# Local env variants
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Node lockfiles
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Frontend build outputs
+build/
+out/
+dist/
+
+# Misc caches
+.parcel-cache/
+.cache/
+.turbo/
+.next/
+
+# History / editors
+.history/
+
 # Python / FastAPI
 __pycache__/
 *.py[cod]

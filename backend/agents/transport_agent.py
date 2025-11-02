@@ -1,9 +1,14 @@
 import google.generativeai as genai
+import logging
 from typing import List, Optional
 from models.schemas import TransportSearchRequest, TransportSearchResponse, TransportMode, TransportOption
 from config import settings
 import json
 import random
+from datetime import datetime
+from utils.irctc_api import get_trains, get_station_code
+import concurrent.futures
+import asyncio
 
 
 class TransportAgent:
@@ -17,90 +22,299 @@ class TransportAgent:
     
     """
     
+    # Airline code to full name mapping
+    AIRLINE_NAMES = {
+        '6E': 'IndiGo',
+        'AI': 'Air India',
+        'UK': 'Vistara',
+        'SG': 'SpiceJet',
+        'G8': 'Go First',
+        'I5': 'AirAsia India',
+        'QP': 'Akasa Air',
+        '9I': 'Alliance Air',
+        'IX': 'Air India Express',
+        'S5': 'Star Air',
+        'OG': 'Air India Regional',
+        'LB': 'Air Costa',
+        '2T': 'TruJet',
+        # International airlines that operate in India
+        'BA': 'British Airways',
+        'EK': 'Emirates',
+        'QR': 'Qatar Airways',
+        'SQ': 'Singapore Airlines',
+        'TG': 'Thai Airways',
+        'EY': 'Etihad Airways',
+        'LH': 'Lufthansa',
+        'AF': 'Air France',
+        'KL': 'KLM',
+        'TK': 'Turkish Airlines',
+    }
+    
     def __init__(self):
         genai.configure(api_key=settings.google_ai_api_key)
-        self.model = genai.GenerativeModel('gemini-2.5-flash')
+        self.model = genai.GenerativeModel(
+            'gemini-2.5-flash',
+            generation_config={
+                'temperature': 0.5,
+            },
+            safety_settings={
+                'HARM_CATEGORY_HARASSMENT': 'BLOCK_NONE',
+                'HARM_CATEGORY_HATE_SPEECH': 'BLOCK_NONE',
+                'HARM_CATEGORY_SEXUALLY_EXPLICIT': 'BLOCK_NONE',
+                'HARM_CATEGORY_DANGEROUS_CONTENT': 'BLOCK_NONE'
+            }
+        )
+        self.logger = logging.getLogger(__name__)
     
     def search_transport(self, request: TransportSearchRequest) -> TransportSearchResponse:
         """
-        Search for all transport options
+        Search for all transport options in parallel for faster results
         """
         transport_modes = []
         
-        # Get flight options (would use real API like Amadeus)
-        flights = self._get_flight_options(request)
-        if flights:
-            transport_modes.append(flights)
-        
-        # Get train options using LLM
-        trains = self._get_train_options(request)
-        if trains:
-            transport_modes.append(trains)
-        
-        # Get bus options using LLM
-        buses = self._get_bus_options(request)
-        if buses:
-            transport_modes.append(buses)
-        
-        # Get cab options using LLM
-        cabs = self._get_cab_options(request)
-        if cabs:
-            transport_modes.append(cabs)
+        # Use ThreadPoolExecutor for parallel API calls
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+            # Submit all search tasks in parallel
+            future_flights = executor.submit(self._get_flight_options, request)
+            future_trains = executor.submit(self._get_train_options, request)
+            future_buses = executor.submit(self._get_bus_options, request)
+            future_cabs = executor.submit(self._get_cab_options, request)
+            
+            # Collect results as they complete
+            for future in concurrent.futures.as_completed([future_flights, future_trains, future_buses, future_cabs]):
+                try:
+                    result = future.result(timeout=10)  # 10 second timeout per transport type
+                    if result:
+                        transport_modes.append(result)
+                except Exception as e:
+                    self.logger.warning("Transport search error: %s", e)
+                    continue
         
         return TransportSearchResponse(transport_modes=transport_modes)
     
     def _get_flight_options(self, request: TransportSearchRequest) -> Optional[TransportMode]:
         """
-        Get flight options
-        Only returns flights if route is feasible (sufficient distance)
+        Get flight options using Amadeus API for real data
+        Falls back to generated data if API unavailable
         """
         try:
-            # Check if flight route is feasible
-            # Estimate distance - flights typically only viable for 200+ km
-            estimated_distance = self._estimate_distance(request.origin, request.destination)
+            # Import amadeus service
+            try:
+                from agents.amadeus_integration import amadeus_service
+                
+                # Get IATA codes for cities
+                origin_code = amadeus_service.get_city_code(request.origin)
+                dest_code = amadeus_service.get_city_code(request.destination)
+                
+                # If we have valid codes and amadeus is available, use real data
+                if origin_code and dest_code and amadeus_service.client:
+                    # Format date for Amadeus (YYYY-MM-DD)
+                    travel_date = request.travel_date
+                    if isinstance(travel_date, str):
+                        # Parse and reformat if needed
+                        try:
+                            date_obj = datetime.strptime(travel_date, "%Y-%m-%d")
+                            travel_date = date_obj.strftime("%Y-%m-%d")
+                        except:
+                            pass
+                    else:
+                        travel_date = travel_date.strftime("%Y-%m-%d")
+                    
+                    # Search real flights with reduced results for speed
+                    real_flights = amadeus_service.search_flights(
+                        origin=origin_code,
+                        destination=dest_code,
+                        departure_date=travel_date,
+                        adults=1,
+                        max_results=3  # Reduced from 5 for faster response
+                    )
+                    
+                    # If we got real flight data, use it
+                    if real_flights and len(real_flights) > 0:
+                        options = []
+                        durations = []
+                        
+                        for flight in real_flights:
+                            try:
+                                # Skip if any required field is missing
+                                if not flight.get('duration') or flight['duration'] == 'N/A':
+                                    continue
+                                if not flight.get('departure_time') or flight['departure_time'] == 'N/A':
+                                    continue
+                                    
+                                # Parse duration (format: PT2H30M -> 2h 30m)
+                                duration_str = flight['duration']
+                                duration = duration_str.replace('PT', '').replace('H', 'h ').replace('M', 'm').strip()
+                                if not duration:
+                                    duration = "2h 30m"  # Default
+                                
+                                durations.append(duration)
+                                
+                                # Get airline code and convert to full name
+                                airline_code = flight.get('airline', 'XX')
+                                airline_name = self.AIRLINE_NAMES.get(airline_code, airline_code)
+                                flight_number = flight.get('flight_number', 'N/A')
+                                
+                                # Parse departure time for display
+                                try:
+                                    departure_time = datetime.fromisoformat(flight['departure_time'].replace('Z', '+00:00'))
+                                    time_str = departure_time.strftime("%I:%M %p")
+                                except:
+                                    time_str = "Various times"
+                                
+                                # Parse arrival time if available
+                                arrival_str = ""
+                                if flight.get('arrival_time') and flight['arrival_time'] != 'N/A':
+                                    try:
+                                        arrival_time = datetime.fromisoformat(flight['arrival_time'].replace('Z', '+00:00'))
+                                        arrival_str = f" - {arrival_time.strftime('%I:%M %p')}"
+                                    except:
+                                        pass
+                                
+                                # Get cabin class
+                                cabin_class = flight.get('cabin_class', 'ECONOMY')
+                                if isinstance(cabin_class, str):
+                                    cabin_class = cabin_class.title()
+                                
+                                # Display format: "Air India AI2965"
+                                carrier_display = f"{airline_name} {flight_number}"
+                                time_display = f"{time_str}{arrival_str}"
+                                
+                                options.append(TransportOption(
+                                    carrier=carrier_display,
+                                    time=time_display,
+                                    price=round(flight['price'], 2),
+                                    duration=duration,
+                                    class_type=cabin_class
+                                ))
+                            except Exception as e:
+                                self.logger.debug("Error parsing flight offer: %s", e)
+                                continue
+                        
+                        if options:
+                            # Sort by price
+                            options.sort(key=lambda x: x.price)
+                            avg_price = sum(opt.price for opt in options) / len(options)
+                            
+                            return TransportMode(
+                                mode="Flight",
+                                icon="✈️",
+                                duration=options[0].duration,
+                                price_range=f"₹{int(min(opt.price for opt in options)):,} - ₹{int(max(opt.price for opt in options)):,}",
+                                note="Fastest - Real flight data from Amadeus",
+                                options=options
+                            )
+                    
+                    # No flights found from Amadeus - check if it's due to no airport
+                    if not origin_code or not dest_code:
+                        missing = []
+                        if not origin_code:
+                            missing.append(request.origin)
+                        if not dest_code:
+                            missing.append(request.destination)
+                        self.logger.debug("No airport found for: %s", ', '.join(missing))
+                        return None  # Don't generate fake flights
+                    
+                    self.logger.debug("No real flights found between %s and %s", origin_code, dest_code)
+                    return None  # Don't generate fake flights when airports exist but no flights available
             
-            # Don't offer flights for very short distances (< 150 km)
-            if estimated_distance < 150:
-                print(f"Flight not feasible for {request.origin} to {request.destination} (estimated {estimated_distance} km)")
-                return None
+            except ImportError:
+                self.logger.warning("Amadeus service not available")
+                return None  # Don't generate fake flights without API
+            except Exception as e:
+                self.logger.exception("Error accessing Amadeus API: %s", e)
+                return None  # Don't generate fake flights on error
             
-            # In production,
-            airlines = ["Air India", "IndiGo", "SpiceJet", "Vistara", "Go First", "AirAsia India"]
-            times = ["06:00 AM", "09:00 AM", "11:30 AM", "02:30 PM", "05:00 PM", "08:00 PM"]
-            
-            options = []
-            base_price = self._estimate_flight_price(request.origin, request.destination)
-            
-            for i in range(min(6, len(airlines))):
-                price_variation = random.uniform(0.8, 1.3)
-                options.append(TransportOption(
-                    carrier=airlines[i],
-                    time=times[i % len(times)],
-                    price=round(base_price * price_variation, 2),
-                    duration=self._estimate_duration(request.origin, request.destination, "flight"),
-                    class_type=random.choice(["Economy", "Premium Economy", "Business"])
-                ))
-            
-            # Sort by price
-            options.sort(key=lambda x: x.price)
-            
-            avg_price = sum(opt.price for opt in options) / len(options)
-            
-            return TransportMode(
-                mode="Flight",
-                icon="✈️",
-                duration=options[0].duration if options else "2h 30m",
-                price_range=f"₹{int(min(opt.price for opt in options)):,} - ₹{int(max(opt.price for opt in options)):,}",
-                note="Fastest",
-                options=options
-            )
         except Exception as e:
-            print(f"Error getting flight options: {e}")
+            self.logger.exception("Error getting flight options: %s", e)
             return None
     
     def _get_train_options(self, request: TransportSearchRequest) -> Optional[TransportMode]:
         """
-        Get train options using LLM
+        Get train options using IRCTC API for real data
+        Falls back to LLM-generated data if API unavailable
+        """
+        try:
+            # Try to get real train data from IRCTC API
+            self.logger.debug("Searching trains: %s -> %s", request.origin, request.destination)
+            
+            from_code = get_station_code(request.origin)
+            to_code = get_station_code(request.destination)
+            
+            self.logger.debug("Station codes: %s -> %s", from_code, to_code)
+            
+            if not from_code or not to_code:
+                self.logger.debug("Could not find station codes for %s or %s", request.origin, request.destination)
+                return self._get_fallback_train_options(request)
+            
+            # Parse travel date if it's a string
+            travel_date = request.travel_date
+            if isinstance(travel_date, str):
+                try:
+                    travel_date = datetime.strptime(travel_date, "%Y-%m-%d").date()
+                except:
+                    travel_date = datetime.now().date()
+            
+            self.logger.debug("Travel date: %s", travel_date)
+            
+            # Get real trains from IRCTC API
+            trains_data = get_trains(from_code, to_code, travel_date)
+            
+            self.logger.debug("IRCTC API returned: %d trains", len(trains_data) if trains_data else 0)
+            
+            if trains_data and len(trains_data) > 0:
+                # We have real train data!
+                options = []
+                
+                for train in trains_data[:5]:  # Limit to 5 options
+                    # Get the cheapest available class
+                    price_range = train.get('price_range', {})
+                    if price_range:
+                        # Sort by price to get cheapest and most expensive
+                        sorted_classes = sorted(price_range.items(), key=lambda x: x[1])
+                        cheapest_class, cheapest_price = sorted_classes[0]
+                        
+                        # Create multiple options for different classes
+                        for class_type, price in sorted_classes[:3]:  # Max 3 classes per train
+                            options.append(TransportOption(
+                                carrier=f"{train['train_name']} ({train['train_number']})",
+                                time=f"Dep: {train['departure_time']} | Arr: {train['arrival_time']}",
+                                price=float(price),
+                                duration=train['duration'],
+                                class_type=class_type
+                            ))
+                
+                if options:
+                    # Sort by price
+                    options.sort(key=lambda x: x.price)
+                    
+                    # Get price range
+                    min_price = min(opt.price for opt in options)
+                    max_price = max(opt.price for opt in options)
+                    
+                    # Get average duration
+                    duration = trains_data[0]['duration'] if trains_data else "12h 00m"
+                    
+                    return TransportMode(
+                        mode="Train",
+                        icon="🚆",
+                        duration=duration,
+                        price_range=f"₹{int(min_price):,} - ₹{int(max_price):,}",
+                        note="Most Comfortable | Real IRCTC Data",
+                        options=options
+                    )
+            
+            # If no real data, fall back to LLM generation
+            self.logger.warning("No IRCTC data available, using fallback generation")
+            return self._get_fallback_train_options(request)
+            
+        except Exception as e:
+            self.logger.exception("Error getting train options from IRCTC: %s", e)
+            return self._get_fallback_train_options(request)
+    
+    def _get_fallback_train_options(self, request: TransportSearchRequest) -> Optional[TransportMode]:
+        """
+        Fallback method using LLM when IRCTC API is unavailable
         """
         prompt = f"""
         Generate realistic train options from {request.origin} to {request.destination} on {request.travel_date}.
@@ -148,7 +362,7 @@ class TransportAgent:
                         class_type=opt.get("class_type")
                     ))
                 except (ValueError, KeyError) as e:
-                    print(f"Error parsing train option: {e}")
+                    self.logger.debug("Error parsing train option: %s", e)
                     continue
             
             if not options:
@@ -164,7 +378,7 @@ class TransportAgent:
             )
             
         except Exception as e:
-            print(f"Error getting train options: {e}")
+            self.logger.exception("Error getting train options: %s", e)
             return self._get_fallback_train_options(request)
     
     def _get_bus_options(self, request: TransportSearchRequest) -> Optional[TransportMode]:
@@ -188,11 +402,26 @@ class TransportAgent:
         
         try:
             response = self.model.generate_content(prompt)
+            
+            if not hasattr(response, 'text') or not response.text:
+                self.logger.debug("No valid response from AI for bus options")
+                return self._get_fallback_bus_options(request)
+            
             content = response.text.strip()
+            
+            # Clean markdown formatting
             if content.startswith("```"):
-                content = content.split("```")[1]
-                if content.startswith("json"):
-                    content = content[4:]
+                parts = content.split("```")
+                if len(parts) >= 2:
+                    content = parts[1]
+                    if content.startswith("json"):
+                        content = content[4:]
+            
+            # Extract JSON if embedded in text
+            if '{' in content and '}' in content:
+                start = content.index('{')
+                end = content.rindex('}') + 1
+                content = content[start:end]
             
             data = json.loads(content)
             
@@ -217,7 +446,7 @@ class TransportAgent:
                         class_type=opt.get("class_type")
                     ))
                 except (ValueError, KeyError) as e:
-                    print(f"Error parsing bus option: {e}")
+                    self.logger.debug("Error parsing bus option: %s", e)
                     continue
             
             if not options:
@@ -233,7 +462,7 @@ class TransportAgent:
             )
             
         except Exception as e:
-            print(f"Error getting bus options: {e}")
+            self.logger.exception("Error getting bus options: %s", e)
             return self._get_fallback_bus_options(request)
     
     def _get_cab_options(self, request: TransportSearchRequest) -> Optional[TransportMode]:
@@ -289,7 +518,7 @@ class TransportAgent:
                         class_type=opt.get("class_type")
                     ))
                 except (ValueError, KeyError) as e:
-                    print(f"Error parsing cab option: {e}, option: {opt}")
+                    self.logger.debug("Error parsing cab option: %s, option: %s", e, opt)
                     continue
             
             if not options:
@@ -305,7 +534,7 @@ class TransportAgent:
             )
             
         except Exception as e:
-            print(f"Error getting cab options: {e}")
+            self.logger.exception("Error getting cab options: %s", e)
             return self._get_fallback_cab_options(request)
     
     def _estimate_flight_price(self, origin: str, destination: str) -> float:
@@ -423,22 +652,6 @@ class TransportAgent:
             return f"{int(hours)}h {int((hours % 1) * 60)}m"
         
         return "N/A"
-    
-    def _get_fallback_train_options(self, request: TransportSearchRequest) -> Optional[TransportMode]:
-        """Fallback train data"""
-        options = [
-            TransportOption(carrier="Rajdhani Express", time="08:00 PM", price=3500, duration="12h 00m", class_type="2AC"),
-            TransportOption(carrier="Shatabdi Express", time="06:00 AM", price=2800, duration="12h 30m", class_type="3AC"),
-            TransportOption(carrier="Duronto Express", time="10:30 PM", price=3200, duration="11h 45m", class_type="2AC"),
-        ]
-        return TransportMode(
-            mode="Train",
-            icon="🚆",
-            duration="12h 00m",
-            price_range="₹2,800 - ₹3,500",
-            note="Most Comfortable",
-            options=options
-        )
     
     def _get_fallback_bus_options(self, request: TransportSearchRequest) -> Optional[TransportMode]:
         """Fallback bus data"""

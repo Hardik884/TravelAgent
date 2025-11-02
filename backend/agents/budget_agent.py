@@ -1,7 +1,9 @@
 import google.generativeai as genai
+import logging
 from typing import Dict, List
 from models.schemas import TripRequest, BudgetResponse, BudgetBreakdown
 from config import settings
+from datetime import datetime, date
 import json
 
 
@@ -18,6 +20,12 @@ class BudgetAgent:
             generation_config={
                 'temperature': 0.7,
                 'max_output_tokens': 200,
+            },
+            safety_settings={
+                'HARM_CATEGORY_HARASSMENT': 'BLOCK_NONE',
+                'HARM_CATEGORY_HATE_SPEECH': 'BLOCK_NONE',
+                'HARM_CATEGORY_SEXUALLY_EXPLICIT': 'BLOCK_NONE',
+                'HARM_CATEGORY_DANGEROUS_CONTENT': 'BLOCK_NONE'
             }
         )
         
@@ -59,6 +67,7 @@ class BudgetAgent:
                 "misc": 5
             }
         }
+        self.logger = logging.getLogger(__name__)
     
     def allocate_budget(self, trip_request: TripRequest) -> BudgetResponse:
         """
@@ -99,7 +108,11 @@ class BudgetAgent:
         """
         Use AI to generate personalized budget recommendations
         """
-        days = (trip_request.end_date - trip_request.start_date).days
+        # Convert dates to date objects if they're strings
+        start_date = trip_request.start_date if isinstance(trip_request.start_date, date) else datetime.fromisoformat(trip_request.start_date).date()
+        end_date = trip_request.end_date if isinstance(trip_request.end_date, date) else datetime.fromisoformat(trip_request.end_date).date()
+        
+        days = (end_date - start_date).days
         
         prompt = f"""Give 3 budget tips for a {days}-day {trip_request.trip_type} trip to {trip_request.destination} with {trip_request.budget} rupees budget."""
         
@@ -122,7 +135,7 @@ class BudgetAgent:
             raise Exception("No valid response from AI")
             
         except Exception as e:
-            print(f"Error getting AI recommendations: {e}")
+            self.logger.exception("Error getting AI recommendations: %s", e)
             return f"• Book accommodation early in {trip_request.destination}\n• Use local transport to save costs\n• Try local restaurants for authentic food\n• Reserve ₹{breakdown[2].value:.0f} for activities"
 
 

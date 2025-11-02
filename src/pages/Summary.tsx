@@ -1,21 +1,63 @@
 import { motion } from 'framer-motion';
-import { Download, MapPin, Calendar, Users, Wallet, Hotel, Plane } from 'lucide-react';
+import { Download, MapPin, Calendar, Users, Wallet, Hotel, Plane, Save, Loader2 } from 'lucide-react';
 import BudgetChart from '../components/BudgetChart';
 import { useTripContext } from '../context/TripContext';
-import { useNavigate } from 'react-router-dom';
-import { useEffect } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
+import { useEffect, useState } from 'react';
 import jsPDF from 'jspdf';
+import { tripHistoryAPI } from '../utils/api';
+import type { SavedTrip } from '../types';
+
+// Capitalize hotel names properly
+const formatHotelName = (name: string) => {
+  const lowercase = ['a', 'an', 'the', 'and', 'but', 'or', 'for', 'nor', 'on', 'at', 'to', 'by', 'in', 'of'];
+  
+  return name
+    .toLowerCase()
+    .split(' ')
+    .map((word, index) => {
+      if (index === 0) {
+        return word.charAt(0).toUpperCase() + word.slice(1);
+      }
+      if (lowercase.includes(word)) {
+        return word;
+      }
+      return word.charAt(0).toUpperCase() + word.slice(1);
+    })
+    .join(' ');
+};
 
 export default function Summary() {
-  const { tripData, budgetData, selectedHotel, selectedTransport, itinerary } = useTripContext();
+  const { tripData, budgetData, selectedHotel, selectedTransport, itinerary, setTripData, setBudgetData, setSelectedHotel, setSelectedTransport, setItinerary } = useTripContext();
   const navigate = useNavigate();
+  const location = useLocation();
+  const [saving, setSaving] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
+  const [isViewingHistory, setIsViewingHistory] = useState(false);
+
+  // TODO: Replace with actual user ID from auth
+  const userId = 'user_demo';
+
+  // Load saved trip if coming from history
+  useEffect(() => {
+    const savedTrip = location.state?.savedTrip as SavedTrip | undefined;
+    if (savedTrip) {
+      setIsViewingHistory(true);
+      // Populate context with saved trip data
+      setTripData(savedTrip.trip);
+      setBudgetData(savedTrip.budget);
+      if (savedTrip.hotel) setSelectedHotel(savedTrip.hotel);
+      if (savedTrip.transport) setSelectedTransport(savedTrip.transport);
+      if (savedTrip.itinerary) setItinerary(savedTrip.itinerary);
+    }
+  }, [location.state, setTripData, setBudgetData, setSelectedHotel, setSelectedTransport, setItinerary]);
 
   // Redirect if no trip data
   useEffect(() => {
-    if (!tripData) {
+    if (!tripData && !location.state?.savedTrip) {
       navigate('/trip-planner');
     }
-  }, [tripData, navigate]);
+  }, [tripData, navigate, location.state]);
 
   if (!tripData || !budgetData) {
     return null;
@@ -201,6 +243,7 @@ export default function Summary() {
   };
 
   const calculateNights = () => {
+    if (!tripData) return 0;
     const start = new Date(tripData.start_date);
     const end = new Date(tripData.end_date);
     const diffTime = Math.abs(end.getTime() - start.getTime());
@@ -208,24 +251,139 @@ export default function Summary() {
     return diffDays;
   };
 
+  // Calculate actual trip costs
+  const calculateActualCosts = () => {
+    const nights = calculateNights();
+    
+    // Hotel cost (price per night * number of nights)
+    const hotelCost = selectedHotel ? selectedHotel.price * nights : 0;
+    
+    // Transport cost (2-way)
+    let transportCost = 0;
+    if (selectedTransport?.selectedOption) {
+      transportCost = selectedTransport.selectedOption.price * 2;
+    } else if (selectedTransport?.price_range) {
+      // Parse price range like "₹5,000 - ₹8,000" and take average
+      const priceMatch = selectedTransport.price_range.match(/₹([\d,]+)\s*-\s*₹([\d,]+)/);
+      if (priceMatch) {
+        const min = parseInt(priceMatch[1].replace(/,/g, ''));
+        const max = parseInt(priceMatch[2].replace(/,/g, ''));
+        transportCost = ((min + max) / 2) * 2;
+      }
+    }
+    
+    // Activities + Food cost from itinerary
+    const activitiesCost = itinerary?.total_activities_cost || 0;
+    
+    // Miscellaneous (10% of total)
+    const subtotal = hotelCost + transportCost + activitiesCost;
+    const miscCost = subtotal * 0.10;
+    
+    // Total actual cost
+    const totalActual = subtotal + miscCost;
+    
+    // Round to nearest thousand
+    const totalRounded = Math.round(totalActual / 1000) * 1000;
+    
+    // Compare with user's budget
+    const userBudget = budgetData?.total || 0;
+    const difference = userBudget - totalRounded;
+    const percentageUsed = (totalRounded / userBudget) * 100;
+    
+    return {
+      hotelCost,
+      transportCost,
+      activitiesCost,
+      miscCost,
+      subtotal,
+      totalActual: totalRounded,
+      userBudget,
+      difference,
+      percentageUsed,
+      isOverBudget: difference < 0,
+      nights
+    };
+  };
+
+  const budgetAnalysis = calculateActualCosts();  const handleSaveTrip = async () => {
+    if (!tripData || !budgetData) {
+      alert('No trip data to save');
+      return;
+    }
+
+    setSaving(true);
+    try {
+      await tripHistoryAPI.saveTrip({
+        user_id: userId,
+        trip: tripData,
+        budget: budgetData,
+        hotel: selectedHotel || undefined,
+        transport: selectedTransport || undefined,
+        itinerary: itinerary || undefined,
+      });
+      
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 3000);
+      
+      // Optional: Navigate to trip history after a delay
+      setTimeout(() => {
+        navigate('/trip-history');
+      }, 1500);
+    } catch (err) {
+      console.error('Failed to save trip:', err);
+      alert('Failed to save trip. Please try again.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
-    <div className="min-h-screen relative">
-      <div className="absolute inset-0 bg-cover bg-center opacity-30" style={{ backgroundImage: "linear-gradient(rgba(4,6,12,0.35), rgba(3,6,12,0.45)), url('https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?auto=format&fit=crop&w=1800&q=80')" }} />
-      <div className="relative max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
+    <div className="page-container summary-bg">
+      <div className="page-overlay" />
+      <div className="page-content max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5 }}
         >
           <div className="flex items-center justify-between mb-8">
-            <h1 className="text-4xl font-extrabold text-white">Trip Summary</h1>
-            <button
-              onClick={handleDownloadPDF}
-              className="glass-button px-5 py-2 rounded-md font-semibold flex items-center gap-2"
-            >
-              <Download className="w-5 h-5" />
-              Download PDF
-            </button>
+            <div>
+              <h1 className="text-5xl font-extrabold text-white mb-2">Trip Summary</h1>
+              <p className="text-gray-400">Your complete travel plan at a glance</p>
+            </div>
+            <div className="flex gap-3">
+              {!isViewingHistory && (
+                <button
+                  onClick={handleSaveTrip}
+                  disabled={saving || saveSuccess}
+                  className="glass-button px-6 py-3 rounded-xl font-semibold flex items-center gap-2 disabled:opacity-50 hover:scale-105 transition-transform"
+                >
+                  {saving ? (
+                    <>
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                      Saving...
+                    </>
+                  ) : saveSuccess ? (
+                    <>
+                      <Save className="w-5 h-5" />
+                      Saved!
+                    </>
+                  ) : (
+                    <>
+                      <Save className="w-5 h-5" />
+                      Save Trip
+                    </>
+                  )}
+                </button>
+              )}
+              <button
+                onClick={handleDownloadPDF}
+                className="glass-button px-6 py-3 rounded-xl font-semibold flex items-center gap-2 hover:scale-105 transition-transform"
+              >
+                <Download className="w-5 h-5" />
+                Download PDF
+              </button>
+            </div>
           </div>
 
           <div className="grid lg:grid-cols-3 gap-6 mb-8">
@@ -252,6 +410,118 @@ export default function Summary() {
             <BudgetChart data={budgetData} />
           </div>
 
+          {/* Budget Analysis Card */}
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ duration: 0.5, delay: 0.2 }}
+            className="mb-8"
+          >
+            <div className={`glass rounded-xl p-6 border-2 ${budgetAnalysis.isOverBudget ? 'border-red-500/50' : 'border-green-500/50'}`}>
+              <div className="flex items-center gap-3 mb-4">
+                <Wallet className={`w-7 h-7 ${budgetAnalysis.isOverBudget ? 'text-red-400' : 'text-green-400'}`} />
+                <h2 className="text-2xl font-bold text-white">Budget Analysis</h2>
+              </div>
+
+              <div className="grid md:grid-cols-2 gap-6 mb-6">
+                {/* Cost Breakdown */}
+                <div className="space-y-3">
+                  <h3 className="text-lg font-semibold text-white mb-3">Actual Costs</h3>
+                  
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-300 flex items-center gap-2">
+                      <Hotel className="w-4 h-4" />
+                      Accommodation ({budgetAnalysis.nights} nights)
+                    </span>
+                    <span className="text-white font-semibold">₹{budgetAnalysis.hotelCost.toLocaleString()}</span>
+                  </div>
+
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-300 flex items-center gap-2">
+                      <Plane className="w-4 h-4" />
+                      Transport (Round trip)
+                    </span>
+                    <span className="text-white font-semibold">₹{Math.round(budgetAnalysis.transportCost).toLocaleString()}</span>
+                  </div>
+
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-300 flex items-center gap-2">
+                      <span className="text-sm">🍽️</span>
+                      Food + Activities
+                    </span>
+                    <span className="text-white font-semibold">₹{Math.round(budgetAnalysis.activitiesCost).toLocaleString()}</span>
+                  </div>
+
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-300 flex items-center gap-2">
+                      <span className="text-sm">✨</span>
+                      Miscellaneous (10%)
+                    </span>
+                    <span className="text-white font-semibold">₹{Math.round(budgetAnalysis.miscCost).toLocaleString()}</span>
+                  </div>
+
+                  <div className="flex justify-between items-center pt-3 border-t border-white/20">
+                    <span className="text-white font-bold">Total Estimated Cost</span>
+                    <span className="text-xl font-bold text-white">₹{budgetAnalysis.totalActual.toLocaleString()}</span>
+                  </div>
+                </div>
+
+                {/* Budget Comparison */}
+                <div className="flex flex-col justify-center">
+                  <div className="glass-card p-5 rounded-lg">
+                    <div className="text-center mb-4">
+                      <p className="text-gray-300 text-sm mb-2">Your Budget</p>
+                      <p className="text-3xl font-bold text-white">₹{budgetAnalysis.userBudget.toLocaleString()}</p>
+                    </div>
+
+                    <div className="relative h-3 bg-gray-700/50 rounded-full overflow-hidden mb-4">
+                      <div 
+                        className={`absolute top-0 left-0 h-full transition-all duration-1000 ${
+                          budgetAnalysis.isOverBudget ? 'bg-red-500' : 'bg-green-500'
+                        }`}
+                        style={{ width: `${Math.min(budgetAnalysis.percentageUsed, 100)}%` }}
+                      />
+                    </div>
+
+                    <div className="text-center">
+                      {budgetAnalysis.isOverBudget ? (
+                        <>
+                          <div className="text-red-400 text-2xl font-bold mb-2">
+                            ₹{Math.abs(budgetAnalysis.difference).toLocaleString()}
+                          </div>
+                          <p className="text-red-300 text-sm font-medium">Over Budget</p>
+                          <div className="mt-4 p-3 bg-red-500/10 rounded-lg border border-red-500/30">
+                            <p className="text-red-200 text-xs">
+                              💡 Consider increasing your budget or selecting a more affordable hotel/transport option.
+                            </p>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div className="text-green-400 text-2xl font-bold mb-2">
+                            ₹{budgetAnalysis.difference.toLocaleString()}
+                          </div>
+                          <p className="text-green-300 text-sm font-medium">Saved!</p>
+                          <div className="mt-4 p-3 bg-green-500/10 rounded-lg border border-green-500/30">
+                            <p className="text-green-200 text-xs">
+                              🎉 Great planning! You're staying within budget with room for extra experiences.
+                            </p>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="mt-4 text-center">
+                    <p className="text-gray-400 text-xs">
+                      Using {budgetAnalysis.percentageUsed.toFixed(1)}% of your budget
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </motion.div>
+
           <div className="grid lg:grid-cols-2 gap-6 mb-8">
             {selectedHotel && (
               <div className="glass rounded-xl p-6">
@@ -266,7 +536,7 @@ export default function Summary() {
                     className="w-36 h-36 object-cover rounded-lg shadow-md"
                   />
                   <div className="flex-1">
-                    <h3 className="text-lg font-semibold text-white mb-1">{selectedHotel.name}</h3>
+                    <h3 className="text-lg font-semibold text-white mb-1">{formatHotelName(selectedHotel.name)}</h3>
                     <p className="text-gray-300 text-sm mb-2">{selectedHotel.location}</p>
                     <div className="flex items-center justify-between">
                       <span className="text-teal-300 text-sm">{selectedHotel.rating} ⭐</span>
@@ -298,16 +568,36 @@ export default function Summary() {
                     <div>
                       <p className="text-white font-medium">{selectedTransport.mode}</p>
                       <p className="text-gray-300 text-sm">{selectedTransport.duration}</p>
+                      {selectedTransport.selectedOption && (
+                        <p className="text-teal-300 text-sm mt-1">{selectedTransport.selectedOption.carrier}</p>
+                      )}
                     </div>
                     <span className="text-2xl">{selectedTransport.icon}</span>
                   </div>
                   <div className="flex items-center justify-between pt-3 border-t border-white/10">
-                    <span className="text-gray-300">Estimated Cost</span>
-                    <p className="text-white font-bold">{selectedTransport.price_range}</p>
+                    <span className="text-gray-300">
+                      {selectedTransport.selectedOption ? 'Selected Cost' : 'Estimated Cost'}
+                    </span>
+                    <p className="text-white font-bold">
+                      {selectedTransport.selectedOption 
+                        ? `₹${selectedTransport.selectedOption.price.toLocaleString()}`
+                        : selectedTransport.price_range
+                      }
+                    </p>
                   </div>
-                  <div className="bg-white/6 rounded-lg p-3 mt-3">
-                    <p className="text-teal-200 text-sm">{selectedTransport.note} option</p>
-                  </div>
+                  {selectedTransport.selectedOption && (
+                    <div className="bg-teal-500/10 border border-teal-500/30 rounded-lg p-3 mt-3">
+                      <p className="text-teal-200 text-sm">
+                        {selectedTransport.selectedOption.carrier} • {selectedTransport.selectedOption.time}
+                        {selectedTransport.selectedOption.class_type && ` • ${selectedTransport.selectedOption.class_type}`}
+                      </p>
+                    </div>
+                  )}
+                  {!selectedTransport.selectedOption && (
+                    <div className="bg-white/6 rounded-lg p-3 mt-3">
+                      <p className="text-teal-200 text-sm">{selectedTransport.note.replace(/\s*-\s*Real flight data from Amadeus/i, '').replace(/\s*\|\s*Real IRCTC Data/i, '').trim()} option</p>
+                    </div>
+                  )}
                 </div>
               </div>
             )}

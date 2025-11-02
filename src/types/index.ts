@@ -67,6 +67,7 @@ export interface TransportMode {
   price_range: string;
   note: string;
   options: TransportOption[];
+  selectedOption?: TransportOption; // Store the selected specific option
 }
 
 export interface TransportSearchRequest {
@@ -111,4 +112,41 @@ export interface ItineraryResponse {
   itinerary: DayPlan[];
   total_activities_cost: number;
   recommendations: string;
+}
+
+// Trip History Types
+export interface SavedTrip {
+  id?: string;
+  user_id: string;
+  trip: TripData;
+  budget: BudgetResponse;
+  hotel?: Hotel;
+  transport?: TransportMode;
+  itinerary?: ItineraryResponse;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SaveTripRequest {
+  user_id: string;
+  trip: TripData;
+  budget: BudgetResponse;
+  hotel?: Hotel;
+  transport?: TransportMode;
+  itinerary?: ItineraryResponse;
+}
+
+export interface UpdateTripRequest {
+  trip?: TripData;
+  budget?: BudgetResponse;
+  hotel?: Hotel;
+  transport?: TransportMode;
+  itinerary?: ItineraryResponse;
+}
+
+export interface TripListResponse {
+  trips: SavedTrip[];
+  total: number;
+  page: number;
+  limit: number;
 }

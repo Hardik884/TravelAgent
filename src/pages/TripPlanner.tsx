@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Calendar, Users, Wallet, MapPin, Loader2, User } from 'lucide-react';
+import { Calendar, Users, Wallet, MapPin, Sparkles, User } from 'lucide-react';
 import BudgetChart from '../components/BudgetChart';
 import { tripTypes } from '../utils/mockData';
 import { budgetAPI } from '../utils/api';
@@ -111,15 +111,18 @@ export default function TripPlanner() {
   };
 
   return (
-    <div className="min-h-screen relative">
-      <div className="absolute inset-0 bg-cover bg-center" style={{ backgroundImage: "linear-gradient(rgba(15,23,42,0.45), rgba(2,6,23,0.45)), url('https://images.unsplash.com/photo-1501785888041-af3ef285b470?auto=format&fit=crop&w=1650&q=80')" }} />
-      <div className="relative max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-20">
+    <div className="page-container planner-bg">
+      <div className="page-overlay" />
+      <div className="page-content max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-20">
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5 }}
         >
-          <h1 className="text-4xl font-bold text-white mb-8 text-center">Plan Your Journey</h1>
+          <div className="text-center mb-8">
+            <h1 className="text-5xl font-extrabold text-white mb-3">Plan Your Journey</h1>
+            <p className="text-gray-400 text-lg">Let AI craft your perfect travel experience</p>
+          </div>
 
           {!showBudget ? (
             <div className="glass-scope rounded-xl shadow-xl p-8">
@@ -265,15 +268,18 @@ export default function TripPlanner() {
                 <button
                   type="submit"
                   disabled={loading}
-                  className="w-full glass-button text-white py-3 rounded-lg font-semibold transition-colors flex items-center justify-center gap-2"
+                  className="w-full glass-button text-white py-4 rounded-xl font-bold text-lg transition-all flex items-center justify-center gap-2 hover:scale-105"
                 >
                   {loading ? (
                     <>
-                      <Loader2 className="w-5 h-5 animate-spin" />
+                      <div className="loading-spinner w-5 h-5" />
                       Analyzing Budget...
                     </>
                   ) : (
-                    'Generate Budget Plan'
+                    <>
+                      <Sparkles className="w-5 h-5" />
+                      Generate Budget Plan
+                    </>
                   )}
                 </button>
                 
